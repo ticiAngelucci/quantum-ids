@@ -1814,13 +1814,13 @@ def main() -> None:
     if st.session_state.get("selected_quantum_dataset_source") != selected_quantum_dataset_source:
         st.session_state["selected_quantum_dataset_source"] = selected_quantum_dataset_source
 
-    if current_step == "1. Panorama":
+    if current_step == "1. Vision general":
         render_overview_tab(model_data, selected_model)
-    elif current_step == "2. Laboratorio":
+    elif current_step == "2. Probar modelo":
         render_lab_tab(model_data, selected_model, selected_quantum_qubits, selected_quantum_dataset_source)
     elif current_step == "3. Analisis":
         render_analysis_tab(model_data, selected_model, selected_quantum_dataset_source)
-    elif current_step == "4. Demo":
+    elif current_step == "4. Simulacion":
         render_demo_tab(model_data, selected_model)
     else:
         render_conclusion_tab(model_data, selected_model)
