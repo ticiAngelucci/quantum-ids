@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 from pathlib import Path
 
@@ -32,14 +34,14 @@ def find_label_column(df: pd.DataFrame) -> str:
     )
 
 
-def convert_to_binary_label(value) -> int:
+def convert_to_binary_label(value: object) -> int:
     value = str(value).strip().lower()
     if value == "benign":
         return 0
     return 1
 
 
-def main():
+def main() -> None:
     if not DATASET_PATH.exists():
         raise FileNotFoundError(
             f"No se encontro el dataset en {DATASET_PATH}. "

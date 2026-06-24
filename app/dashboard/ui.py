@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import streamlit as st
 
-from app.dashboard.constants import ENABLED_MODEL_OPTIONS, MODEL_DATA, SUPPORTED_QUANTUM_DATASET_SOURCES, SUPPORTED_QUANTUM_QUBITS
+from app.dashboard.constants import ENABLED_MODEL_OPTIONS, SUPPORTED_QUANTUM_DATASET_SOURCES, SUPPORTED_QUANTUM_QUBITS
+from app.dashboard.types import ModelData, QuantumDatasetSource, SectionName, SidebarSelection
 
 
 def section_header(title: str, description: str) -> None:
@@ -37,7 +38,8 @@ def render_metric_card(label: str, value: float, caption: str) -> None:
     )
 
 
-def render_header(model_data: dict) -> None:
+def render_header(model_data: ModelData) -> None:
+    _ = model_data
     st.markdown(
         """
         <section class="hero">
@@ -70,12 +72,18 @@ def render_header(model_data: dict) -> None:
     )
 
 
+def _reset_quantum_lab_state() -> None:
+    st.session_state.pop("quantum_lab_results", None)
+    st.session_state.pop("quantum_lab_results_qubits", None)
+    st.session_state.pop("quantum_lab_results_source", None)
+
+
 def render_sidebar_controls(
-    model_data: dict,
+    model_data: ModelData,
     selected_quantum_qubits: int,
-    selected_quantum_dataset_source: str,
-) -> tuple[str, int, str, str]:
-    section_options = [
+    selected_quantum_dataset_source: QuantumDatasetSource,
+) -> SidebarSelection:
+    section_options: list[SectionName] = [
         "1. Vision general",
         "2. Probar modelo",
         "3. Analisis",
@@ -114,9 +122,7 @@ def render_sidebar_controls(
             )
             if quantum_dataset_source != selected_quantum_dataset_source:
                 st.session_state["selected_quantum_dataset_source"] = quantum_dataset_source
-                st.session_state.pop("quantum_lab_results", None)
-                st.session_state.pop("quantum_lab_results_qubits", None)
-                st.session_state.pop("quantum_lab_results_source", None)
+                _reset_quantum_lab_state()
                 st.rerun()
             selected_quantum_dataset_source = quantum_dataset_source
             st.session_state["selected_quantum_dataset_source"] = quantum_dataset_source
@@ -129,9 +135,7 @@ def render_sidebar_controls(
             )
             if chosen_qubits != selected_quantum_qubits:
                 st.session_state["selected_quantum_qubits"] = chosen_qubits
-                st.session_state.pop("quantum_lab_results", None)
-                st.session_state.pop("quantum_lab_results_qubits", None)
-                st.session_state.pop("quantum_lab_results_source", None)
+                _reset_quantum_lab_state()
                 st.rerun()
             selected_quantum_qubits = chosen_qubits
             st.session_state["selected_quantum_qubits"] = chosen_qubits
@@ -175,9 +179,14 @@ def render_sidebar_controls(
                     Live: trafico del laboratorio.<br>
                     IBM validate: local + validacion corta en IBM.
                 </div>
-            </div>
+                </div>
             """,
             unsafe_allow_html=True,
         )
 
-    return selected_model, selected_quantum_qubits, selected_quantum_dataset_source, current_step
+    return SidebarSelection(
+        selected_model=selected_model,
+        selected_quantum_qubits=selected_quantum_qubits,
+        selected_quantum_dataset_source=selected_quantum_dataset_source,
+        current_step=current_step,
+    )

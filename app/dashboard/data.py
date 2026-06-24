@@ -18,6 +18,7 @@ from app.dashboard.constants import (
     RESULTS_DIR,
     SCALER_PATH,
 )
+from app.dashboard.types import ClassicalArtifacts, ModelData, QuantumDatasetSource
 
 
 def load_classical_results() -> dict | None:
@@ -42,19 +43,22 @@ def load_classical_results() -> dict | None:
     }
 
 
-def get_quantum_results_path(qubits: int, dataset_source: str = "cicids"):
+def get_quantum_results_path(qubits: int, dataset_source: QuantumDatasetSource = "cicids"):
     if dataset_source == "live":
         return RESULTS_DIR / f"quantum_live_simulated_metrics_{qubits}q.json"
     return RESULTS_DIR / f"quantum_simulated_metrics_{qubits}q.json"
 
 
-def get_quantum_hardware_results_path(qubits: int, dataset_source: str = "cicids"):
+def get_quantum_hardware_results_path(qubits: int, dataset_source: QuantumDatasetSource = "cicids"):
     if dataset_source == "live":
         return RESULTS_DIR / f"quantum_live_hardware_metrics_{qubits}q.json"
     return RESULTS_DIR / f"quantum_hardware_metrics_{qubits}q.json"
 
 
-def load_quantum_simulated_results(qubits: int | None = None, dataset_source: str = "cicids") -> dict | None:
+def load_quantum_simulated_results(
+    qubits: int | None = None,
+    dataset_source: QuantumDatasetSource = "cicids",
+) -> dict | None:
     if qubits is None:
         results_path = QUANTUM_LIVE_RESULTS_PATH if dataset_source == "live" else QUANTUM_SIMULATED_RESULTS_PATH
     else:
@@ -86,7 +90,10 @@ def load_quantum_simulated_results(qubits: int | None = None, dataset_source: st
     }
 
 
-def load_quantum_hardware_results(qubits: int | None = None, dataset_source: str = "cicids") -> dict | None:
+def load_quantum_hardware_results(
+    qubits: int | None = None,
+    dataset_source: QuantumDatasetSource = "cicids",
+) -> dict | None:
     if qubits is None:
         results_path = QUANTUM_LIVE_HARDWARE_RESULTS_PATH if dataset_source == "live" else QUANTUM_HARDWARE_RESULTS_PATH
     else:
@@ -125,8 +132,11 @@ def load_quantum_hardware_results(qubits: int | None = None, dataset_source: str
     }
 
 
-def get_model_data(selected_quantum_qubits: int = 4, selected_quantum_dataset_source: str = "cicids") -> dict:
-    model_data = {
+def get_model_data(
+    selected_quantum_qubits: int = 4,
+    selected_quantum_dataset_source: QuantumDatasetSource = "cicids",
+) -> ModelData:
+    model_data: ModelData = {
         name: {
             **values,
             "source": "mock",
@@ -247,7 +257,7 @@ def get_model_data(selected_quantum_qubits: int = 4, selected_quantum_dataset_so
     return model_data
 
 
-def load_classical_artifacts():
+def load_classical_artifacts() -> ClassicalArtifacts | None:
     if not (CLASSICAL_MODEL_PATH.exists() and SCALER_PATH.exists() and PCA_PATH.exists()):
         return None
     return {

@@ -4,7 +4,7 @@
 
 `quantum-ids` compara un pipeline clásico de detección de anomalías contra un pipeline de `Quantum Machine Learning`, manteniendo además un flujo experimental `live` para trabajar con tráfico capturado en laboratorio.
 
-La arquitectura actual separa cuatro responsabilidades:
+La arquitectura actual separa cuatro responsabilidades principales:
 
 1. entrenamiento clásico
 2. entrenamiento cuántico
@@ -38,8 +38,44 @@ app/app.py
           ├── theme.py
           ├── data.py
           ├── analytics.py
+          ├── types.py
           ├── ui.py
-          └── views.py
+          ├── views.py          # fachada mínima que reexporta vistas
+          └── pages/*
+
+src/live_detection/
+    ├── capture.py
+    ├── feature_extractor.py
+    ├── compatibility.py        # compatibilidad entre features live y modelo clásico
+    └── predict_live.py
+```
+
+## Estructura actual resumida
+
+```text
+app/
+  app.py
+  dashboard/
+    analytics.py
+    constants.py
+    data.py
+    theme.py
+    types.py
+    ui.py
+    views.py
+    pages/
+      overview.py
+      lab.py
+      analysis.py
+      demo.py
+      conclusions.py
+
+src/
+  classical/
+  live_detection/
+  preprocessing/
+  quantum/
+  utils/
 ```
 
 ## Capas del proyecto
@@ -96,6 +132,7 @@ Responsabilidad:
 - capturar tráfico por ventanas
 - resumir paquetes en features agregadas
 - verificar compatibilidad con el modelo clásico actual
+- reutilizar esa validación tanto en CLI como en dashboard
 
 Importante:
 
@@ -103,21 +140,84 @@ Importante:
 - no opera sobre paquetes individuales a nivel de inferencia
 - trabaja con ventanas agregadas
 
+Módulos relevantes:
+
+- `capture.py`: CLI para captura live o lectura de PCAP
+- `feature_extractor.py`: cálculo de features agregadas por ventana
+- `compatibility.py`: contrato de columnas esperado por el baseline clásico
+- `predict_live.py`: validación de compatibilidad e inferencia clásica solo si las columnas coinciden
+
 ### 5. `app/dashboard`
 
 Responsabilidad:
 
 - mantener el dashboard separado por módulos
 - evitar que `app/app.py` concentre toda la lógica
+- diferenciar claramente configuración, datos, componentes visuales y páginas
 
 Submódulos:
 
 - `constants.py`: rutas, constantes, colores, metadata base
 - `theme.py`: configuración de página y CSS
 - `data.py`: carga de resultados y artefactos
+- `types.py`: contratos compartidos del dashboard
 - `analytics.py`: gráficos, evaluación clásica, monitoreo live y helpers analíticos
 - `ui.py`: componentes visuales simples
-- `views.py`: vistas principales del dashboard
+- `views.py`: capa de compatibilidad que reexporta las páginas
+- `pages/`: vistas principales del dashboard separadas por pantalla
+
+Páginas actuales:
+
+- `overview.py`: lectura general del estado del sistema
+- `lab.py`: laboratorio clásico, laboratorio cuántico y monitoreo live
+- `analysis.py`: comparación, corridas VQC, ruido y tiempos
+- `demo.py`: simulación simple orientada a explicación
+- `conclusions.py`: cierre ejecutivo del dashboard
+
+## Contratos importantes
+
+### 1. `results/` como frontera de integración
+
+El proyecto usa `results/` como frontera simple entre entrenamiento, captura y visualización.
+
+Archivos clave:
+
+- `results/classical_metrics.json`
+- `results/random_forest_model.joblib`
+- `results/scaler.joblib`
+- `results/pca.joblib`
+- `results/quantum_simulated_metrics*.json`
+- `results/quantum_hardware_metrics*.json`
+- `results/quantum_live_simulated_metrics*.json`
+- `results/quantum_live_hardware_metrics*.json`
+- `results/live_capture.csv`
+- `results/live_training_dataset.csv`
+
+### 2. `model_data` en dashboard
+
+`app/dashboard/data.py` arma un `model_data` unificado para:
+
+- `Modelo clasico`
+- `Modelo cuantico`
+- `Hardware cuantico real`
+
+Ese contrato es consumido por:
+
+- páginas
+- gráficos
+- sidebar
+- tarjetas de resumen
+
+### 3. `SidebarSelection`
+
+El estado principal de navegación del dashboard se sintetiza en `SidebarSelection`:
+
+- modelo activo
+- qubits activos
+- fuente cuántica activa
+- sección activa
+
+Eso evita que la UI y el renderizado queden desincronizados por cambios de `session_state`.
 
 ## Flujo clásico
 
@@ -163,6 +263,11 @@ captura / pcap
 
 El punto clave es que el `VQC live` solo es válido si el modelo fue entrenado con las mismas features que genera la captura live.
 
+En otras palabras:
+
+- captura live != detección inmediata
+- captura live -> dataset live -> entrenamiento/evaluación VQC live
+
 ## Flujo de monitoreo live en dashboard
 
 El dashboard puede automatizar la captura por lotes para el flujo cuántico `live`.
@@ -187,6 +292,12 @@ Límites:
 La lógica de entrenamiento y captura vive en `src/`.
 El dashboard consume esas capacidades y muestra resultados.
 
+Esto permite:
+
+- probar scripts por terminal sin depender de Streamlit
+- mantener la UI como capa de orquestación
+- desacoplar el laboratorio visual del pipeline de entrenamiento
+
 ### Mantener `results/` como frontera simple
 
 Los modelos y métricas se persisten como archivos.
@@ -201,33 +312,45 @@ Eso hace que:
 El generador de tráfico está deliberadamente fuera del dashboard.
 La UI trabaja sobre captura, features, entrenamiento y análisis.
 
+### Introducir tipado liviano en la UI
+
+El dashboard ya no depende solo de `dict` anónimos:
+
+- `types.py` define contratos para selección de sidebar y estructura de `model_data`
+- esto reduce errores de sincronización y hace más legibles los cambios futuros
+
 ## Deuda técnica restante
 
 Todavía conviene seguir refactorizando:
 
-- dividir `views.py` por pantalla (`overview`, `lab`, `analysis`, etc.)
-- unificar tipos de retorno con `dataclass` o `TypedDict`
+- partir `app/dashboard/pages/lab.py`, que hoy sigue siendo la pantalla más grande
+- expandir el tipado mas alla del dashboard hacia `src/`
 - limpiar imports duplicados o sobrantes en `src/`
 - documentar contratos de `results/*.json`
 - separar mejor el flujo de inferencia live del flujo de entrenamiento live
+- evaluar mover persistencia de sesión del dashboard a helpers dedicados
 
 ## Criterio de organización futura
 
 Si el proyecto sigue creciendo, la dirección recomendada es:
 
 ```text
-app/dashboard/views/
+app/dashboard/pages/
     overview.py
-    lab.py
     analysis.py
     demo.py
     conclusions.py
+    lab/
+      classical.py
+      quantum.py
+      live_monitor.py
 
 src/live_detection/
     capture.py
     feature_extractor.py
+    compatibility.py
     prediction.py
     dataset_builder.py
 ```
 
-Eso permitiría mantener cada archivo más pequeño, con una responsabilidad bien definida y menos costo de lectura.
+Eso permitiría mantener cada archivo más pequeño, con una responsabilidad bien definida y menos costo de lectura, especialmente en el laboratorio del dashboard.

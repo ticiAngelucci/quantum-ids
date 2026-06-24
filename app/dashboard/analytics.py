@@ -21,18 +21,18 @@ from app.dashboard.constants import (
     MUTED_TEXT,
     PCA_PATH,
     PRIMARY_BLUE,
-    RESULTS_DIR,
     SCALER_PATH,
     SECONDARY_BLUE,
     SUPPORTED_QUANTUM_QUBITS,
     TEXT,
-    UPLOADED_QUANTUM_DATASET_PATH,
 )
 from app.dashboard.data import load_classical_artifacts, load_quantum_simulated_results
+from app.dashboard.types import ModelData
+from src.live_detection.compatibility import compare_feature_sets, load_expected_classical_features
 from src.classical.train_model import convert_to_binary_label, find_label_column
 
 
-def build_metrics_dataframe(model_data: dict) -> pd.DataFrame:
+def build_metrics_dataframe(model_data: ModelData) -> pd.DataFrame:
     rows = []
     for model in model_data.values():
         rows.extend(
@@ -46,7 +46,7 @@ def build_metrics_dataframe(model_data: dict) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def build_time_dataframe(model_data: dict) -> pd.DataFrame:
+def build_time_dataframe(model_data: ModelData) -> pd.DataFrame:
     return pd.DataFrame(
         {
             "Modelo": [model["short_label"] for model in model_data.values()],
@@ -92,7 +92,7 @@ def build_quantum_runs_dataframe(dataset_source: str = "cicids") -> pd.DataFrame
     return pd.DataFrame(rows)
 
 
-def make_global_comparison_chart(model_data: dict, height: int = 320) -> go.Figure:
+def make_global_comparison_chart(model_data: ModelData, height: int = 320) -> go.Figure:
     metrics_df = build_metrics_dataframe(model_data)
     fig = px.bar(
         metrics_df,
@@ -144,7 +144,7 @@ def make_confusion_chart(matrix: np.ndarray, height: int = 320) -> go.Figure:
     return fig
 
 
-def make_time_chart(model_data: dict, height: int = 320) -> go.Figure:
+def make_time_chart(model_data: ModelData, height: int = 320) -> go.Figure:
     time_df = build_time_dataframe(model_data)
     fig = px.bar(
         time_df,
@@ -170,7 +170,7 @@ def make_time_chart(model_data: dict, height: int = 320) -> go.Figure:
     return fig
 
 
-def make_noise_chart(model_data: dict, height: int = 320) -> go.Figure:
+def make_noise_chart(model_data: ModelData, height: int = 320) -> go.Figure:
     simulated = model_data["Modelo cuantico"]
     hardware = model_data["Hardware cuantico real"]
     noise_df = pd.DataFrame(
@@ -273,36 +273,9 @@ def evaluate_classical_dataset(df: pd.DataFrame, use_holdout_split: bool) -> dic
     return result
 
 
-def load_expected_classical_features(dataset_path: Path = DATASET_PATH) -> list[str]:
-    if not dataset_path.exists():
-        raise FileNotFoundError(
-            f"No se encontro {dataset_path}. No se puede validar compatibilidad con el modelo clasico."
-        )
-
-    df = pd.read_csv(dataset_path, nrows=512)
-    df.columns = [str(col).strip() for col in df.columns]
-    label_column = find_label_column(df)
-    numeric_columns = df.drop(columns=[label_column]).select_dtypes(include=["number"]).columns.tolist()
-
-    if not numeric_columns:
-        raise ValueError("No se detectaron columnas numericas en el dataset clasico.")
-
-    return numeric_columns
-
-
-def compare_live_feature_sets(live_columns: list[str], expected_columns: list[str]) -> dict[str, list[str] | bool]:
-    live_set = set(live_columns)
-    expected_set = set(expected_columns)
-    return {
-        "compatible": live_columns == expected_columns,
-        "missing": sorted(expected_set - live_set),
-        "extra": sorted(live_set - expected_set),
-    }
-
-
 def predict_classical_live_batch(live_df: pd.DataFrame) -> dict:
-    expected_features = load_expected_classical_features()
-    comparison = compare_live_feature_sets(live_df.columns.tolist(), expected_features)
+    expected_features = load_expected_classical_features(DATASET_PATH)
+    comparison = compare_feature_sets(live_df.columns.tolist(), expected_features)
     if not comparison["compatible"]:
         return {
             "compatible": False,
@@ -387,7 +360,7 @@ def predict_quantum_live_batch(
     training_df.columns = [str(col).strip() for col in training_df.columns]
     label_column = find_label_column(training_df)
     expected_features = training_df.drop(columns=[label_column]).select_dtypes(include=[np.number]).columns.tolist()
-    comparison = compare_live_feature_sets(live_df.columns.tolist(), expected_features)
+    comparison = compare_feature_sets(live_df.columns.tolist(), expected_features)
     if not comparison["compatible"]:
         raise ValueError(
             "Las features capturadas no coinciden con el dataset live de entrenamiento. "

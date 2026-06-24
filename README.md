@@ -14,6 +14,7 @@ El proyecto también incluye un flujo `live` para capturar tráfico en ventanas,
 app/
   app.py                  # entrypoint del dashboard Streamlit
   dashboard/              # UI modular, gráficos, carga de datos y vistas
+    pages/                # pantallas del dashboard separadas por responsabilidad
 
 src/
   classical/              # entrenamiento y utilidades del modelo clásico
@@ -21,6 +22,78 @@ src/
   preprocessing/          # limpieza, escalado y PCA para QML
   quantum/                # entrenamiento VQC y validación IBM
   utils/                  # helpers compartidos
+```
+
+## Puesta en marcha
+
+### Requisitos
+
+- Python `3.10` o superior
+- `pip`
+- acceso a una terminal
+- opcional: entorno virtual `venv`
+
+### Ubuntu
+
+```bash
+sudo apt update
+sudo apt install python3 python3-venv python3-pip
+python3 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+streamlit run app/app.py
+```
+
+### macOS
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+streamlit run app/app.py
+```
+
+Si `python3` no existe, primero instalá Python con Homebrew o desde el instalador oficial.
+
+### Windows PowerShell
+
+```powershell
+py -3 -m venv venv
+.\venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+streamlit run app/app.py
+```
+
+Si PowerShell bloquea la activación del entorno virtual, podés habilitarla para tu usuario con:
+
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+### Windows CMD
+
+```cmd
+py -3 -m venv venv
+venv\Scripts\activate.bat
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+streamlit run app/app.py
+```
+
+### URL del dashboard
+
+Cuando Streamlit arranca, normalmente queda disponible en:
+
+- `http://localhost:8501`
+- o `http://IP_LOCAL:8501` si lo levantás para verlo desde otra máquina de la red
+
+Ejemplo:
+
+```bash
+streamlit run app/app.py --server.address 0.0.0.0 --server.port 8501
 ```
 
 ## Flujos principales
