@@ -66,11 +66,17 @@ QUANTUM_LIVE_RESULTS_PATH = RESULTS_DIR / "quantum_live_simulated_metrics.json"
 QUANTUM_HARDWARE_RESULTS_PATH = RESULTS_DIR / "quantum_hardware_metrics.json"
 QUANTUM_LIVE_HARDWARE_RESULTS_PATH = RESULTS_DIR / "quantum_live_hardware_metrics.json"
 LIVE_TRAINING_DATASET_PATH = RESULTS_DIR / "live_training_dataset.csv"
+LIVE_CAPTURE_PATH = RESULTS_DIR / "live_capture.csv"
+UPLOADED_QUANTUM_DATASET_PATH = RESULTS_DIR / "uploaded_quantum_dataset.csv"
 CLASSICAL_MODEL_PATH = RESULTS_DIR / "random_forest_model.joblib"
 SCALER_PATH = RESULTS_DIR / "scaler.joblib"
 PCA_PATH = RESULTS_DIR / "pca.joblib"
 SUPPORTED_QUANTUM_QUBITS = (2, 4, 6, 8)
 SUPPORTED_QUANTUM_DATASET_SOURCES = ("cicids", "live")
+LIVE_CLASSICAL_INCOMPATIBLE_MESSAGE = (
+    "El modelo actual fue entrenado con features CICIDS2017. "
+    "Para usar live_capture.csv se debe entrenar un modelo nuevo con estas mismas features."
+)
 
 MODEL_DATA = {
     "Modelo clasico": {
@@ -744,6 +750,13 @@ def render_sidebar_controls(
     selected_quantum_qubits: int,
     selected_quantum_dataset_source: str,
 ) -> tuple[str, int, str, str]:
+    section_options = [
+        "1. Vision general",
+        "2. Probar modelo",
+        "3. Analisis",
+        "4. Simulacion",
+        "5. Conclusiones",
+    ]
     with st.sidebar:
         st.markdown("## Quantum IDS")
         st.caption(
@@ -802,16 +815,14 @@ def render_sidebar_controls(
         st.markdown("### Seccion")
         current_step = st.radio(
             "Seccion",
-            options=[
-                "1. Vision general",
-                "2. Probar modelo",
-                "3. Analisis",
-                "4. Simulacion",
-                "5. Conclusiones",
-            ],
+            options=section_options,
             key="journey_radio",
+            index=section_options.index(st.session_state.get("current_step", "1. Vision general"))
+            if st.session_state.get("current_step", "1. Vision general") in section_options
+            else 0,
             label_visibility="collapsed",
         )
+        st.session_state["current_step"] = current_step
 
         model = model_data[selected_model]
         source_class = "real" if model["source"] == "real" else "mock"
@@ -1088,6 +1099,140 @@ def evaluate_classical_dataset(df: pd.DataFrame, use_holdout_split: bool) -> dic
     return result
 
 
+def load_expected_classical_features(dataset_path: Path = DATASET_PATH) -> list[str]:
+    if not dataset_path.exists():
+        raise FileNotFoundError(
+            f"No se encontro {dataset_path}. No se puede validar compatibilidad con el modelo clasico."
+        )
+
+    df = pd.read_csv(dataset_path, nrows=512)
+    df.columns = [str(col).strip() for col in df.columns]
+    label_column = find_label_column(df)
+    numeric_columns = df.drop(columns=[label_column]).select_dtypes(include=["number"]).columns.tolist()
+    if not numeric_columns:
+        raise ValueError("No se detectaron columnas numericas en el dataset clasico.")
+    return numeric_columns
+
+
+def compare_live_feature_sets(live_columns: list[str], expected_columns: list[str]) -> dict[str, list[str] | bool]:
+    live_set = set(live_columns)
+    expected_set = set(expected_columns)
+    return {
+        "compatible": live_columns == expected_columns,
+        "missing": sorted(expected_set - live_set),
+        "extra": sorted(live_set - expected_set),
+    }
+
+
+def predict_classical_live_batch(live_df: pd.DataFrame) -> dict:
+    expected_features = load_expected_classical_features()
+    comparison = compare_live_feature_sets(live_df.columns.tolist(), expected_features)
+    if not comparison["compatible"]:
+        return {
+            "compatible": False,
+            "missing": comparison["missing"],
+            "extra": comparison["extra"],
+            "message": LIVE_CLASSICAL_INCOMPATIBLE_MESSAGE,
+        }
+
+    artifacts = load_classical_artifacts()
+    if artifacts is None:
+        raise FileNotFoundError("No se encontraron modelo, scaler o PCA clasicos en results/.")
+
+    transformed = artifacts["scaler"].transform(live_df[expected_features])
+    projected = artifacts["pca"].transform(transformed)
+    predictions = artifacts["model"].predict(projected)
+    return {
+        "compatible": True,
+        "predictions": predictions.tolist(),
+        "prediction_counts": {
+            "normal": int((predictions == 0).sum()),
+            "intrusion": int((predictions == 1).sum()),
+        },
+    }
+
+
+def capture_live_monitoring_batch(
+    *,
+    duration: int,
+    windows: int,
+    iface: str | None = None,
+    count: int = 0,
+    output_path: Path = LIVE_CAPTURE_PATH,
+    label: str | None = None,
+    append_to_training: bool = False,
+    logger=lambda _message: None,
+) -> pd.DataFrame:
+    from src.live_detection.capture import capture_packets, save_features
+    from src.live_detection.feature_extractor import extract_live_features
+
+    if duration <= 0 or windows <= 0:
+        raise ValueError("La duracion y la cantidad de ventanas deben ser mayores a 0.")
+
+    batch_rows: list[dict[str, float | str]] = []
+    if output_path.exists():
+        output_path.unlink()
+
+    for window_index in range(windows):
+        logger(f"Capturando ventana {window_index + 1} de {windows}...")
+        packets, elapsed = capture_packets(duration=duration, iface=iface, count=count)
+        features = extract_live_features(packets=packets, duration_seconds=elapsed)
+        if label is not None:
+            features["Label"] = label
+        batch_rows.append(features)
+        save_features(features, output_path, append=window_index > 0)
+        if append_to_training and label is not None:
+            save_features(features, LIVE_TRAINING_DATASET_PATH, append=True)
+
+    return pd.DataFrame(batch_rows)
+
+
+def predict_quantum_live_batch(
+    *,
+    live_df: pd.DataFrame,
+    num_qubits: int,
+    test_size: float,
+    logger=lambda _message: None,
+) -> dict:
+    from src.preprocessing.quantum_preprocessing import prepare_quantum_dataset
+    from src.quantum.train_vqc_simulator import build_vqc
+
+    if not LIVE_TRAINING_DATASET_PATH.exists():
+        raise FileNotFoundError(
+            f"No existe {LIVE_TRAINING_DATASET_PATH.as_posix()}. Genera capturas benign y attack antes de inferir en vivo."
+        )
+
+    dataset_bundle = prepare_quantum_dataset(
+        dataset_path=LIVE_TRAINING_DATASET_PATH,
+        pca_components=num_qubits,
+        test_size=test_size,
+    )
+    training_df = pd.read_csv(LIVE_TRAINING_DATASET_PATH)
+    training_df.columns = [str(col).strip() for col in training_df.columns]
+    label_column = find_label_column(training_df)
+    expected_features = training_df.drop(columns=[label_column]).select_dtypes(include=[np.number]).columns.tolist()
+    comparison = compare_live_feature_sets(live_df.columns.tolist(), expected_features)
+    if not comparison["compatible"]:
+        raise ValueError(
+            "Las features capturadas no coinciden con el dataset live de entrenamiento. "
+            f"Faltantes: {comparison['missing']} | Extras: {comparison['extra']}"
+        )
+
+    logger("Entrenando VQC live en simulador para inferencia inmediata...")
+    vqc, _ = build_vqc(num_qubits=num_qubits, execution_target="simulator", logger=logger)
+    vqc.fit(dataset_bundle.X_train, dataset_bundle.y_train)
+    batch_scaled = dataset_bundle.scaler.transform(live_df[expected_features])
+    batch_pca = dataset_bundle.pca.transform(batch_scaled)
+    predictions = np.asarray(vqc.predict(batch_pca)).astype(int)
+    return {
+        "prediction_counts": {
+            "normal": int((predictions == 0).sum()),
+            "intrusion": int((predictions == 1).sum()),
+        },
+        "predictions": predictions.tolist(),
+    }
+
+
 def inspect_live_quantum_dataset(
     dataset_path: Path = LIVE_TRAINING_DATASET_PATH,
     test_size: float = 0.2,
@@ -1243,9 +1388,129 @@ def render_lab_tab(
         "Laboratorio de prueba",
         "Espacio de experimentacion guiada para ejecutar pruebas sin salir del dashboard.",
     )
+    if selected_model == "Modelo cuantico" and selected_quantum_dataset_source == "live":
+        st.markdown("#### Monitoreo live automatizado")
+        st.caption(
+            "Captura varias ventanas seguidas desde la UI, guarda el lote en results/live_capture.csv y, cuando corresponde, lo agrega tambien al dataset live de entrenamiento."
+        )
+        monitor_left, monitor_right = st.columns([1.25, 1])
+        with monitor_left:
+            live_duration = st.number_input("Duracion por ventana (segundos)", min_value=1, max_value=60, value=2, step=1, key="live_monitor_duration")
+            live_windows = st.number_input("Cantidad de ventanas", min_value=1, max_value=100, value=5, step=1, key="live_monitor_windows")
+            live_iface = st.text_input("Interfaz de red opcional", value="", placeholder="Ej: wlan0", key="live_monitor_iface")
+            live_count = st.number_input("Limite de paquetes por ventana", min_value=0, max_value=100000, value=0, step=10, key="live_monitor_count")
+            live_label = st.selectbox(
+                "Guardar este lote como",
+                options=["Sin etiqueta", "benign", "attack"],
+                index=0,
+                key="live_monitor_label",
+            )
+            append_to_training = live_label in {"benign", "attack"}
+            run_live_monitoring = st.button("Capturar lote live desde el front", width="stretch", type="primary", key="live_monitor_run")
+        with monitor_right:
+            render_info_card("Archivo de salida", LIVE_CAPTURE_PATH.as_posix(), "Cada lote capturado desde el front se guarda aca.")
+            st.write("")
+            render_info_card(
+                "Uso recomendado",
+                "1 boton, varias ventanas",
+                "Sirve para dejar de abrir capturas una por una. Si asignas etiqueta, el lote tambien se agrega al dataset live.",
+            )
+            st.write("")
+            render_info_card(
+                "Inferencia cuantica live",
+                "Experimental",
+                "Si ya existe un dataset live suficiente, el dashboard puede entrenar un VQC en simulador y predecir este lote capturado.",
+            )
+
+        if run_live_monitoring:
+            progress_placeholder = st.empty()
+            try:
+                live_monitor_label_value = None if live_label == "Sin etiqueta" else live_label
+
+                def live_logger(message: str) -> None:
+                    progress_placeholder.info(message)
+
+                with st.spinner("Capturando ventanas y procesando features live..."):
+                    live_batch_df = capture_live_monitoring_batch(
+                        duration=int(live_duration),
+                        windows=int(live_windows),
+                        iface=live_iface or None,
+                        count=int(live_count),
+                        label=live_monitor_label_value,
+                        append_to_training=append_to_training,
+                        logger=live_logger,
+                    )
+
+                monitor_result = {
+                    "batch_df": live_batch_df.to_dict(orient="records"),
+                    "rows": int(len(live_batch_df)),
+                    "label": live_monitor_label_value,
+                    "saved_to_training": append_to_training,
+                    "output_path": LIVE_CAPTURE_PATH.as_posix(),
+                }
+
+                if selected_quantum_dataset_source == "live":
+                    selected_quantum_test_size = float(st.session_state.get("selected_quantum_test_size", 0.2))
+                    quantum_live_summary = inspect_live_quantum_dataset(test_size=selected_quantum_test_size)
+                    if quantum_live_summary["ready"] and selected_quantum_qubits <= quantum_live_summary["max_supported_qubits"]:
+                        prediction_result = predict_quantum_live_batch(
+                            live_df=live_batch_df.select_dtypes(include=[np.number]),
+                            num_qubits=selected_quantum_qubits,
+                            test_size=selected_quantum_test_size,
+                            logger=live_logger,
+                        )
+                        monitor_result["prediction_result"] = prediction_result
+                    else:
+                        monitor_result["prediction_result"] = {
+                            "compatible": False,
+                            "message": (
+                                "Todavia no hay dataset live suficiente para inferencia cuantica directa desde el front. "
+                                "Captura mas ventanas benign y attack o baja los qubits."
+                            ),
+                        }
+                else:
+                    monitor_result["prediction_result"] = {
+                        "compatible": False,
+                        "message": (
+                            "La inferencia live automatica del VQC solo aplica al modo 'Live simulador'. "
+                            "Si estas en CICIDS, usa el flujo de entrenamiento y evaluacion actual."
+                        ),
+                    }
+
+                st.session_state["live_monitor_results"] = monitor_result
+                progress_placeholder.empty()
+            except Exception as error:
+                progress_placeholder.empty()
+                st.error(f"No pude ejecutar el monitoreo live: {error}")
+
+        live_monitor_results = st.session_state.get("live_monitor_results")
+        if live_monitor_results:
+            st.success(
+                f"Lote live capturado: {live_monitor_results['rows']} ventanas guardadas en {live_monitor_results['output_path']}."
+            )
+            if live_monitor_results.get("saved_to_training"):
+                st.caption(
+                    f"Este lote tambien se agrego a {LIVE_TRAINING_DATASET_PATH.as_posix()} con etiqueta {live_monitor_results['label']}."
+                )
+            preview_df = pd.DataFrame(live_monitor_results["batch_df"])
+            st.dataframe(preview_df, width="stretch")
+            prediction_result = live_monitor_results.get("prediction_result", {})
+            if "prediction_counts" in prediction_result:
+                pred_cols = st.columns(2)
+                with pred_cols[0]:
+                    render_info_card("Ventanas benignas", str(prediction_result["prediction_counts"]["normal"]), "Resultado del VQC live para este lote.")
+                with pred_cols[1]:
+                    render_info_card("Ventanas attack", str(prediction_result["prediction_counts"]["intrusion"]), "Ventanas marcadas como anomalias por el VQC live.")
+            else:
+                st.info(prediction_result.get("message", "El monitoreo live ya capturo el lote; ahora puedes usarlo para entrenar el VQC."))
+            st.write("")
+    elif selected_model == "Modelo cuantico":
+        st.session_state.pop("live_monitor_results", None)
+
     if selected_model == "Modelo cuantico":
         selected_quantum_execution_target = st.session_state.get("selected_quantum_execution_target", "simulator")
         selected_quantum_test_size = float(st.session_state.get("selected_quantum_test_size", 0.2))
+        selected_quantum_data_source = st.session_state.get("quantum_cicids_data_source", "Usar data/dataset.csv")
         live_dataset_summary = (
             inspect_live_quantum_dataset(test_size=selected_quantum_test_size)
             if selected_quantum_dataset_source == "live"
@@ -1257,6 +1522,24 @@ def render_lab_tab(
             st.caption(
                 "Aca se ejecuta el experimento cuantico. El sistema entrena y evalua un clasificador variacional sobre una muestra controlada del dataset elegido."
             )
+            uploaded_quantum_file = None
+            resolved_quantum_dataset_path = None
+            if selected_quantum_dataset_source == "cicids":
+                selected_quantum_data_source = st.radio(
+                    "Origen de datos",
+                    ["Usar data/dataset.csv", "Subir CSV propio"],
+                    horizontal=True,
+                    key="quantum_cicids_data_source",
+                )
+                if selected_quantum_data_source == "Subir CSV propio":
+                    uploaded_quantum_file = st.file_uploader(
+                        "CSV para entrenar y evaluar el VQC",
+                        type=["csv"],
+                        key="quantum_cicids_csv_uploader",
+                    )
+                    resolved_quantum_dataset_path = UPLOADED_QUANTUM_DATASET_PATH
+                else:
+                    resolved_quantum_dataset_path = DATASET_PATH
             selected_quantum_execution_target = st.radio(
                 "Modo de ejecucion cuantica",
                 options=["simulator", "ibm_validate"],
@@ -1290,11 +1573,18 @@ def render_lab_tab(
                 width="stretch",
                 type="primary",
                 disabled=(
-                    selected_quantum_dataset_source == "live"
-                    and live_dataset_summary is not None
-                    and (
-                        not live_dataset_summary["ready"]
-                        or selected_quantum_qubits > live_dataset_summary["max_supported_qubits"]
+                    (
+                        selected_quantum_dataset_source == "live"
+                        and live_dataset_summary is not None
+                        and (
+                            not live_dataset_summary["ready"]
+                            or selected_quantum_qubits > live_dataset_summary["max_supported_qubits"]
+                        )
+                    )
+                    or (
+                        selected_quantum_dataset_source == "cicids"
+                        and selected_quantum_data_source == "Subir CSV propio"
+                        and uploaded_quantum_file is None
                     )
                 ),
             )
@@ -1380,6 +1670,13 @@ def render_lab_tab(
                 "Esto afecta solo al experimento cuantico. El modelo clasico no usa el simulador de ataques.",
             )
             st.write("")
+            if selected_quantum_dataset_source == "cicids":
+                render_info_card(
+                    "Dataset elegido",
+                    selected_quantum_data_source.replace("Usar ", ""),
+                    "Para CICIDS podes usar el dataset local o subir un CSV propio solo para este experimento cuantico.",
+                )
+                st.write("")
             render_info_card(
                 "Comando en terminal",
                 (
@@ -1444,10 +1741,22 @@ def render_lab_tab(
                     log_messages.append(message)
                     progress_placeholder.info(message)
 
+                dataset_path_for_run = None
+                if selected_quantum_dataset_source == "cicids":
+                    if selected_quantum_data_source == "Subir CSV propio":
+                        if uploaded_quantum_file is None:
+                            raise ValueError("Subi un CSV antes de ejecutar la prueba cuantica.")
+                        UPLOADED_QUANTUM_DATASET_PATH.parent.mkdir(parents=True, exist_ok=True)
+                        UPLOADED_QUANTUM_DATASET_PATH.write_bytes(uploaded_quantum_file.getvalue())
+                        dataset_path_for_run = UPLOADED_QUANTUM_DATASET_PATH
+                    else:
+                        dataset_path_for_run = DATASET_PATH
+
                 with st.spinner("Entrenando VQC y evaluando resultados..."):
                     quantum_results = train_quantum_simulator(
                         num_qubits=selected_quantum_qubits,
                         dataset_source=selected_quantum_dataset_source,
+                        dataset_path=dataset_path_for_run,
                         test_size=selected_quantum_test_size,
                         execution_target=selected_quantum_execution_target,
                         ibm_validation_samples=selected_ibm_validation_samples,
@@ -1797,6 +2106,8 @@ def render_conclusion_tab(model_data: dict, selected_model: str) -> None:
 def main() -> None:
     configure_page()
     inject_css()
+    if "current_step" not in st.session_state:
+        st.session_state["current_step"] = "1. Vision general"
     selected_quantum_qubits = st.session_state.get("selected_quantum_qubits", 4)
     selected_quantum_dataset_source = st.session_state.get("selected_quantum_dataset_source", "cicids")
     model_data = get_model_data(
@@ -1813,6 +2124,7 @@ def main() -> None:
         st.session_state["selected_quantum_qubits"] = selected_quantum_qubits
     if st.session_state.get("selected_quantum_dataset_source") != selected_quantum_dataset_source:
         st.session_state["selected_quantum_dataset_source"] = selected_quantum_dataset_source
+    st.session_state["current_step"] = current_step
 
     if current_step == "1. Vision general":
         render_overview_tab(model_data, selected_model)
