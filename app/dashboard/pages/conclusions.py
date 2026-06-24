@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import streamlit as st
 
-from app.dashboard.types import ModelData
-from app.dashboard.ui import render_info_card, section_header
+from dashboard.types import ModelData
+from dashboard.ui import render_info_card, section_header
 
 
 def render_conclusion_tab(model_data: ModelData, selected_model: str) -> None:

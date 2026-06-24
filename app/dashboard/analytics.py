@@ -11,7 +11,7 @@ import plotly.graph_objects as go
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score, recall_score
 from sklearn.model_selection import train_test_split
 
-from app.dashboard.constants import (
+from dashboard.constants import (
     ACCENT_YELLOW,
     CLASSICAL_MODEL_PATH,
     DATASET_PATH,
@@ -26,8 +26,8 @@ from app.dashboard.constants import (
     SUPPORTED_QUANTUM_QUBITS,
     TEXT,
 )
-from app.dashboard.data import load_classical_artifacts, load_quantum_simulated_results
-from app.dashboard.types import ModelData
+from dashboard.data import load_classical_artifacts, load_quantum_simulated_results
+from dashboard.types import ModelData
 from src.live_detection.compatibility import compare_feature_sets, load_expected_classical_features
 from src.classical.train_model import convert_to_binary_label, find_label_column
 
@@ -309,6 +309,7 @@ def capture_live_monitoring_batch(
     count: int = 0,
     output_path: Path = LIVE_CAPTURE_PATH,
     label: str | None = None,
+    scenario: str | None = None,
     append_to_training: bool = False,
     logger=lambda _message: None,
 ) -> pd.DataFrame:
@@ -328,8 +329,11 @@ def capture_live_monitoring_batch(
         features = extract_live_features(packets=packets, duration_seconds=elapsed)
         if label is not None:
             features["Label"] = label
-        batch_rows.append(features)
-        save_features(features, output_path, append=window_index > 0)
+        output_features = dict(features)
+        if scenario is not None:
+            output_features["Scenario"] = scenario
+        batch_rows.append(output_features)
+        save_features(output_features, output_path, append=window_index > 0)
         if append_to_training and label is not None:
             save_features(features, LIVE_TRAINING_DATASET_PATH, append=True)
 

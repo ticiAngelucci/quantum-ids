@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import streamlit as st
 
-from app.dashboard.constants import ENABLED_MODEL_OPTIONS, SUPPORTED_QUANTUM_DATASET_SOURCES, SUPPORTED_QUANTUM_QUBITS
-from app.dashboard.types import ModelData, QuantumDatasetSource, SectionName, SidebarSelection
+from dashboard.constants import ENABLED_MODEL_OPTIONS, SUPPORTED_QUANTUM_DATASET_SOURCES, SUPPORTED_QUANTUM_QUBITS
+from dashboard.types import ModelData, QuantumDatasetSource, SectionName, SidebarSelection
 
 
 def section_header(title: str, description: str) -> None:
@@ -83,75 +83,101 @@ def render_sidebar_controls(
     selected_quantum_qubits: int,
     selected_quantum_dataset_source: QuantumDatasetSource,
 ) -> SidebarSelection:
-    section_options: list[SectionName] = [
-        "1. Vision general",
-        "2. Probar modelo",
-        "3. Analisis",
-        "4. Simulacion",
+    all_section_options: list[SectionName] = [
+        "1. Resumen",
+        "2. Experimentar",
+        "3. Live",
+        "4. Analisis",
         "5. Conclusiones",
     ]
     with st.sidebar:
+        current_step = st.session_state.get("current_step", "1. Resumen")
+        config_container = st.container()
+        section_container = st.container()
         st.markdown("## Quantum IDS")
         st.caption(
             "Esta app compara dos caminos para detectar trafico anomalo en red: uno clasico y otro cuantico. "
             "La idea es mostrar resultados, limites y valor experimental de cada enfoque en un lenguaje claro."
         )
 
-        st.markdown("---")
-        st.markdown("### Configuracion")
-        available_models = [model_name for model_name in ENABLED_MODEL_OPTIONS if model_name in model_data]
-        default_model = st.session_state.get("selected_model", "Modelo clasico")
-        if default_model not in available_models:
-            default_model = "Modelo clasico"
-        selected_model = st.radio(
-            "Modelo",
-            options=available_models,
-            index=available_models.index(default_model),
-            key="model_switcher_radio",
-        )
-        st.session_state["selected_model"] = selected_model
-
-        if selected_model == "Modelo cuantico":
-            dataset_source_options = {"cicids": "CICIDS2017", "live": "Live simulador"}
-            quantum_dataset_source = st.radio(
-                "Origen de datos cuanticos",
-                options=list(dataset_source_options.keys()),
-                format_func=lambda key: dataset_source_options[key],
-                index=list(SUPPORTED_QUANTUM_DATASET_SOURCES).index(selected_quantum_dataset_source),
-                key="quantum_dataset_source_radio",
+        with config_container:
+            st.markdown("---")
+            st.markdown("### Configuracion")
+            available_models = [model_name for model_name in ENABLED_MODEL_OPTIONS if model_name in model_data]
+            default_model = st.session_state.get("selected_model", "Modelo clasico")
+            if default_model not in available_models:
+                default_model = "Modelo clasico"
+            selected_model = st.radio(
+                "Modelo",
+                options=available_models,
+                index=available_models.index(default_model),
+                key="model_switcher_radio",
             )
-            if quantum_dataset_source != selected_quantum_dataset_source:
-                st.session_state["selected_quantum_dataset_source"] = quantum_dataset_source
-                _reset_quantum_lab_state()
-                st.rerun()
-            selected_quantum_dataset_source = quantum_dataset_source
-            st.session_state["selected_quantum_dataset_source"] = quantum_dataset_source
+            st.session_state["selected_model"] = selected_model
 
-            chosen_qubits = st.selectbox(
-                "Cantidad de qubits",
-                options=list(SUPPORTED_QUANTUM_QUBITS),
-                index=list(SUPPORTED_QUANTUM_QUBITS).index(selected_quantum_qubits),
-                key="quantum_results_selectbox",
-            )
-            if chosen_qubits != selected_quantum_qubits:
+            if selected_model == "Modelo clasico" and current_step == "3. Live":
+                current_step = "2. Experimentar"
+                st.session_state["current_step"] = current_step
+
+            if selected_model == "Modelo cuantico":
+                if current_step == "2. Experimentar":
+                    selected_quantum_dataset_source = "cicids"
+                    st.session_state["selected_quantum_dataset_source"] = "cicids"
+                elif current_step == "3. Live":
+                    selected_quantum_dataset_source = "live"
+                    st.session_state["selected_quantum_dataset_source"] = "live"
+                    st.caption("Modo live activo: esta seccion usa solo capturas del laboratorio.")
+                else:
+                    dataset_source_options = {"cicids": "CICIDS2017", "live": "Live simulador"}
+                    quantum_dataset_source = st.radio(
+                        "Origen de datos cuanticos",
+                        options=list(dataset_source_options.keys()),
+                        format_func=lambda key: dataset_source_options[key],
+                        index=list(SUPPORTED_QUANTUM_DATASET_SOURCES).index(selected_quantum_dataset_source),
+                        key="quantum_dataset_source_radio",
+                    )
+                    if quantum_dataset_source != selected_quantum_dataset_source:
+                        st.session_state["selected_quantum_dataset_source"] = quantum_dataset_source
+                        _reset_quantum_lab_state()
+                        st.rerun()
+                    selected_quantum_dataset_source = quantum_dataset_source
+                    st.session_state["selected_quantum_dataset_source"] = quantum_dataset_source
+
+                chosen_qubits = st.selectbox(
+                    "Cantidad de qubits",
+                    options=list(SUPPORTED_QUANTUM_QUBITS),
+                    index=list(SUPPORTED_QUANTUM_QUBITS).index(selected_quantum_qubits),
+                    key="quantum_results_selectbox",
+                )
+                if chosen_qubits != selected_quantum_qubits:
+                    st.session_state["selected_quantum_qubits"] = chosen_qubits
+                    _reset_quantum_lab_state()
+                    st.rerun()
+                selected_quantum_qubits = chosen_qubits
                 st.session_state["selected_quantum_qubits"] = chosen_qubits
-                _reset_quantum_lab_state()
-                st.rerun()
-            selected_quantum_qubits = chosen_qubits
-            st.session_state["selected_quantum_qubits"] = chosen_qubits
 
-        st.markdown("---")
-        st.markdown("### Seccion")
-        current_step = st.radio(
-            "Seccion",
-            options=section_options,
-            key="journey_radio",
-            index=section_options.index(st.session_state.get("current_step", "1. Vision general"))
-            if st.session_state.get("current_step", "1. Vision general") in section_options
-            else 0,
-            label_visibility="collapsed",
+        section_options = (
+            all_section_options
+            if selected_model == "Modelo cuantico"
+            else [option for option in all_section_options if option != "3. Live"]
         )
-        st.session_state["current_step"] = current_step
+        if current_step not in section_options:
+            current_step = section_options[0]
+            st.session_state["current_step"] = current_step
+
+        with section_container:
+            st.markdown("---")
+            st.markdown("### Seccion")
+            current_step = st.radio(
+                "Seccion",
+                options=section_options,
+                key="journey_radio",
+                index=section_options.index(st.session_state.get("current_step", current_step))
+                if st.session_state.get("current_step", current_step) in section_options
+                else 0,
+                label_visibility="collapsed",
+            )
+            st.session_state["current_step"] = current_step
 
         model = model_data[selected_model]
         source_class = "real" if model["source"] == "real" else "mock"

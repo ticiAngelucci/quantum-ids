@@ -5,7 +5,7 @@ import json
 import joblib
 import numpy as np
 
-from app.dashboard.constants import (
+from dashboard.constants import (
     CLASSICAL_MODEL_PATH,
     CLASSICAL_RESULTS_PATH,
     LIVE_TRAINING_DATASET_PATH,
@@ -18,7 +18,7 @@ from app.dashboard.constants import (
     RESULTS_DIR,
     SCALER_PATH,
 )
-from app.dashboard.types import ClassicalArtifacts, ModelData, QuantumDatasetSource
+from dashboard.types import ClassicalArtifacts, ModelData, QuantumDatasetSource
 
 
 def load_classical_results() -> dict | None:

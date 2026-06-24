@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import streamlit as st
 
-from app.dashboard.analytics import (
+from dashboard.analytics import (
     build_metrics_dataframe,
     build_quantum_runs_dataframe,
     make_global_comparison_chart,
     make_noise_chart,
     make_time_chart,
 )
-from app.dashboard.types import ModelData
-from app.dashboard.ui import render_info_card, section_header
+from dashboard.types import ModelData
+from dashboard.ui import render_info_card, section_header
 
 
 def render_analysis_tab(model_data: ModelData, selected_model: str, selected_quantum_dataset_source: str) -> None:

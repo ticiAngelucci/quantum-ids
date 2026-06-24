@@ -2,37 +2,79 @@ from __future__ import annotations
 
 import streamlit as st
 
-from app.dashboard.analytics import make_confusion_chart, make_global_comparison_chart
-from app.dashboard.types import ModelData
-from app.dashboard.ui import render_info_card, render_metric_card, section_header
+from dashboard.analytics import make_confusion_chart, make_global_comparison_chart
+from dashboard.pages.demo import render_demo_panel
+from dashboard.types import ModelData
+from dashboard.ui import render_metric_card, section_header
+
+
+def _build_active_model_summary(model_data: ModelData, selected_model: str) -> tuple[str, str]:
+    if selected_model == "Modelo clasico":
+        return (
+            "Modelo clasico",
+            "Estas viendo el baseline principal del proyecto: un Random Forest entrenado sobre datos tabulares. "
+            "Sirve como referencia porque hoy es el enfoque mas estable, rapido y facil de interpretar.",
+        )
+
+    if model_data["Modelo cuantico"].get("selected_dataset_source") == "live":
+        return (
+            "Modelo cuantico · Live simulador",
+            "Estas viendo el experimento cuantico sobre trafico capturado en laboratorio. "
+            "Aca el VQC no trabaja con el dataset CICIDS2017, sino con ventanas reales resumidas en features agregadas.",
+        )
+
+    return (
+        "Modelo cuantico · CICIDS2017",
+        "Estas viendo el experimento cuantico sobre el dataset de referencia CICIDS2017. "
+        "Este modo sirve para comparar el enfoque QML en un entorno controlado antes de pasar al laboratorio live.",
+    )
 
 
 def render_overview_tab(model_data: ModelData, selected_model: str) -> None:
     section_header(
-        "Vision general",
-        "Resumen rapido para entender que modelo estas viendo, que tan bien funciona y de donde salen los datos.",
+        "Resumen",
+        "Vista general para entender que hace el sistema, que significa cada enfoque y como leer los resultados sin conocimientos previos de cuantica.",
     )
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        render_info_card(
-            "Base principal",
-            "data/dataset.csv",
-            "Dataset base del experimento clasico y del escenario cuantico de referencia.",
+    active_title, active_copy = _build_active_model_summary(model_data, selected_model)
+    st.markdown(
+        f"""
+        <div class="compact-card">
+            <div class="card-label">Enfoque activo</div>
+            <div class="card-value">{active_title}</div>
+            <div class="card-help">{active_copy}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.write("")
+    st.markdown("#### Que significa cada termino")
+    term_left, term_right = st.columns(2)
+    with term_left:
+        st.markdown(
+            """
+            **Modelo clasico**
+            Random Forest entrenado con datos tabulares. Es la referencia principal del proyecto.
+
+            **Modelo cuantico**
+            VQC experimental de Qiskit. Se usa para estudiar si un enfoque de Quantum Machine Learning puede aprender patrones utiles.
+
+            **CICIDS2017**
+            Dataset de referencia, curado y estable. Sirve para comparar modelos en un entorno controlado.
+            """
         )
-    with col2:
-        render_info_card(
-            "Estado clasico",
-            model_data["Modelo clasico"]["source_label"],
-            model_data["Modelo clasico"]["description"],
-        )
-    with col3:
-        render_info_card(
-            "Panorama",
-            "2 enfoques comparados",
-            (
-                f"Clasico: {model_data['Modelo clasico']['source_label']} | "
-                f"Cuantico: {model_data['Modelo cuantico']['source_label']}"
-            ),
+    with term_right:
+        st.markdown(
+            """
+            **Live simulador**
+            Dataset armado en laboratorio a partir de trafico capturado por ventanas. Sirve para probar el enfoque cuantico en un entorno mas real.
+
+            **IBM validate**
+            Entrenamiento local mas validacion corta en hardware real. Se usa para medir ruido, cola y limitaciones fisicas sin gastar tanta cuota.
+
+            **Matriz de confusion**
+            Resume cuantos aciertos y errores tuvo el modelo al distinguir trafico benigno e intrusiones.
+            """
         )
 
     if model_data["Modelo cuantico"]["source"] != "real":
@@ -47,9 +89,13 @@ def render_overview_tab(model_data: ModelData, selected_model: str) -> None:
         )
 
     st.write("")
+    st.markdown("#### Comparacion general")
+    st.caption("Este grafico muestra, de forma resumida, como rinden el baseline clasico, el experimento cuantico y el hardware real si ya existe una corrida guardada.")
     st.plotly_chart(make_global_comparison_chart(model_data), width="stretch", key="overview_global_comparison_chart")
 
     model = model_data[selected_model]
+    st.write("")
+    st.markdown(f"#### Resultados actuales: {active_title}")
     metric_cols = st.columns(4)
     with metric_cols[0]:
         render_metric_card("Accuracy", model["accuracy"], "Porcentaje total de aciertos")
@@ -72,6 +118,16 @@ def render_overview_tab(model_data: ModelData, selected_model: str) -> None:
             "La matriz de confusión resume cómo se reparten aciertos y errores entre tráfico benigno e intrusiones detectadas."
         )
     with info_col:
-        render_info_card("Origen de metricas", model["source_label"], "Te dice si los numeros vienen de una corrida real o de una demo.")
-        st.write("")
-        render_info_card("Tiempo estimado", f"{model['execution_time']:.2f}s", "Tiempo total aproximado del enfoque seleccionado.")
+        st.markdown("**Como leer este bloque**")
+        st.markdown(
+            f"""
+            - **Origen de metricas:** {model["source_label"]}
+            - **Tiempo estimado:** {model["execution_time"]:.2f}s
+            - **Descripcion:** {model["description"]}
+            """
+        )
+
+    st.write("")
+    st.markdown("#### Ejemplo simple")
+    st.caption("Mini simulacion pedagogica para ver como cambia la lectura del sistema cuando sube el riesgo de una conexion.")
+    render_demo_panel(selected_model)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from app.dashboard.constants import (
+from dashboard.constants import (
     ACCENT_YELLOW,
     BACKGROUND,
     DANGER,

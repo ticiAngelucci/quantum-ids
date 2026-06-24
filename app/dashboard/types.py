@@ -10,10 +10,10 @@ ModelName = Literal["Modelo clasico", "Modelo cuantico", "Hardware cuantico real
 QuantumDatasetSource = Literal["cicids", "live"]
 QuantumExecutionTarget = Literal["simulator", "ibm_validate", "ibm_quantum"]
 SectionName = Literal[
-    "1. Vision general",
-    "2. Probar modelo",
-    "3. Analisis",
-    "4. Simulacion",
+    "1. Resumen",
+    "2. Experimentar",
+    "3. Live",
+    "4. Analisis",
     "5. Conclusiones",
 ]
 

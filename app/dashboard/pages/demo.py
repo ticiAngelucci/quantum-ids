@@ -2,17 +2,12 @@ from __future__ import annotations
 
 import streamlit as st
 
-from app.dashboard.analytics import classify_mock_connection
-from app.dashboard.types import ModelData
-from app.dashboard.ui import render_info_card, section_header
+from dashboard.analytics import classify_mock_connection
+from dashboard.types import ModelData
+from dashboard.ui import render_info_card, section_header
 
 
-def render_demo_tab(model_data: ModelData, selected_model: str) -> None:
-    _ = model_data
-    section_header(
-        "Demo rapida de conexion",
-        "Una simulacion sencilla para explicar como cambia la lectura del sistema sin cargar datasets reales.",
-    )
+def render_demo_panel(selected_model: str) -> None:
     col1, col2 = st.columns([1.2, 1])
     with col1:
         packet_rate = st.slider("Paquetes por segundo", 50, 1000, 380, 10)
@@ -35,3 +30,12 @@ def render_demo_tab(model_data: ModelData, selected_model: str) -> None:
             )
         else:
             render_info_card("Estado", "Esperando simulacion", "Mové los controles y ejecutá la demo para ver una lectura rapida.")
+
+
+def render_demo_tab(model_data: ModelData, selected_model: str) -> None:
+    _ = model_data
+    section_header(
+        "Demo rapida de conexion",
+        "Una simulacion sencilla para explicar como cambia la lectura del sistema sin cargar datasets reales.",
+    )
+    render_demo_panel(selected_model)
