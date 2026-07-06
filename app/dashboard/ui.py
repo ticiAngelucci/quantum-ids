@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from dashboard.constants import ENABLED_MODEL_OPTIONS, SUPPORTED_QUANTUM_DATASET_SOURCES, SUPPORTED_QUANTUM_QUBITS
+from dashboard.constants import ENABLED_MODEL_OPTIONS, SUPPORTED_QUANTUM_QUBITS
 from dashboard.types import ModelData, QuantumDatasetSource, SectionName, SidebarSelection
 
 
@@ -91,7 +91,7 @@ def render_sidebar_controls(
         "5. Conclusiones",
     ]
     with st.sidebar:
-        current_step = st.session_state.get("current_step", "1. Resumen")
+        current_step = st.session_state.get("journey_radio", st.session_state.get("current_step", "1. Resumen"))
         config_container = st.container()
         section_container = st.container()
         st.markdown("## Quantum IDS")
@@ -117,6 +117,7 @@ def render_sidebar_controls(
 
             if selected_model == "Modelo clasico" and current_step == "3. Live":
                 current_step = "2. Experimentar"
+                st.session_state["journey_radio"] = current_step
                 st.session_state["current_step"] = current_step
 
             if selected_model == "Modelo cuantico":
@@ -126,22 +127,12 @@ def render_sidebar_controls(
                 elif current_step == "3. Live":
                     selected_quantum_dataset_source = "live"
                     st.session_state["selected_quantum_dataset_source"] = "live"
-                    st.caption("Modo live activo: esta seccion usa solo capturas del laboratorio.")
                 else:
-                    dataset_source_options = {"cicids": "CICIDS2017", "live": "Live simulador"}
-                    quantum_dataset_source = st.radio(
-                        "Origen de datos cuanticos",
-                        options=list(dataset_source_options.keys()),
-                        format_func=lambda key: dataset_source_options[key],
-                        index=list(SUPPORTED_QUANTUM_DATASET_SOURCES).index(selected_quantum_dataset_source),
-                        key="quantum_dataset_source_radio",
+                    selected_quantum_dataset_source = st.session_state.get(
+                        "selected_quantum_dataset_source",
+                        selected_quantum_dataset_source,
                     )
-                    if quantum_dataset_source != selected_quantum_dataset_source:
-                        st.session_state["selected_quantum_dataset_source"] = quantum_dataset_source
-                        _reset_quantum_lab_state()
-                        st.rerun()
-                    selected_quantum_dataset_source = quantum_dataset_source
-                    st.session_state["selected_quantum_dataset_source"] = quantum_dataset_source
+                    st.session_state["selected_quantum_dataset_source"] = selected_quantum_dataset_source
 
                 chosen_qubits = st.selectbox(
                     "Cantidad de qubits",

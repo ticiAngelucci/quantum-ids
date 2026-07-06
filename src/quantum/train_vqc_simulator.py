@@ -1,352 +1,41 @@
 import argparse
-import copy
-import os
 import sys
 import time
 from pathlib import Path
 
 import numpy as np
-from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score, recall_score
 
 from src.preprocessing.quantum_preprocessing import prepare_quantum_dataset
+from src.quantum.config import (
+    ATTACK_SAMPLES,
+    BENIGN_SAMPLES,
+    COBYLA_MAXITER,
+    DATASET_PATH,
+    DEFAULT_ANSATZ_REPS,
+    DEFAULT_FEATURE_MAP_REPS,
+    DEFAULT_IBM_SHOTS,
+    DEFAULT_IBM_VALIDATION_SAMPLES,
+    DEFAULT_QUBITS,
+    LIVE_DATASET_PATH,
+    RESULTS_DIR,
+    RANDOM_STATE,
+    SUPPORTED_DATASET_SOURCES,
+    SUPPORTED_EXECUTION_TARGETS,
+    SUPPORTED_QUBITS,
+    TEST_SIZE,
+)
+from src.quantum.results import (
+    add_gap_vs_simulator,
+    build_base_metrics,
+    clone_trained_state,
+    compute_classification_metrics,
+    get_latest_results_path,
+    get_results_path_for_qubits,
+    select_hardware_validation_subset,
+)
+from src.quantum.runtime import build_vqc, extract_hardware_diagnostics
 from src.utils.save_results import save_results
-
-
-DATASET_PATH = Path("data/dataset.csv")
-RESULTS_DIR = Path("results")
-LATEST_RESULTS_PATH = RESULTS_DIR / "quantum_simulated_metrics.json"
-HARDWARE_RESULTS_PATH = RESULTS_DIR / "quantum_hardware_metrics.json"
-LIVE_DATASET_PATH = RESULTS_DIR / "live_training_dataset.csv"
-BENIGN_SAMPLES = 200
-ATTACK_SAMPLES = 200
-DEFAULT_QUBITS = 4
-SUPPORTED_QUBITS = (2, 4, 6, 8)
-SUPPORTED_DATASET_SOURCES = ("cicids", "live")
-SUPPORTED_EXECUTION_TARGETS = ("simulator", "ibm_quantum", "ibm_validate")
-TEST_SIZE = 0.2
-RANDOM_STATE = 42
-COBYLA_MAXITER = 50
-DEFAULT_IBM_SHOTS = 1024
-DEFAULT_IBM_VALIDATION_SAMPLES = 16
-
-
-def import_quantum_dependencies():
-    missing_packages = []
-
-    try:
-        from qiskit.circuit.library import zz_feature_map, real_amplitudes
-    except ImportError as error:
-        raise ImportError("No se pudo importar qiskit. Verifica que `qiskit` este instalado.") from error
-
-    try:
-        from qiskit.primitives import StatevectorSampler
-    except ImportError as error:
-        raise ImportError(
-            "No se pudo importar StatevectorSampler desde qiskit.primitives. "
-            "Revisa la version de qiskit instalada."
-        ) from error
-
-    try:
-        from qiskit_machine_learning.algorithms import VQC
-    except ImportError:
-        missing_packages.append("qiskit-machine-learning")
-        VQC = None
-
-    optimizer_error = None
-    COBYLA = None
-    try:
-        from qiskit_algorithms.optimizers import COBYLA as imported_cobyla
-
-        COBYLA = imported_cobyla
-    except ImportError as error:
-        optimizer_error = error
-        try:
-            from qiskit.algorithms.optimizers import COBYLA as imported_cobyla
-
-            COBYLA = imported_cobyla
-        except ImportError:
-            try:
-                from qiskit_machine_learning.optimizers import COBYLA as imported_cobyla
-
-                COBYLA = imported_cobyla
-            except ImportError:
-                pass
-
-    if VQC is None:
-        install_hint = "python -m pip install qiskit-machine-learning qiskit-aer"
-        raise ImportError(
-            "Falta instalar la libreria necesaria para QML: "
-            f"{', '.join(missing_packages)}. Ejecuta: {install_hint}"
-        )
-
-    if COBYLA is None:
-        raise ImportError(
-            "No se pudo importar COBYLA desde qiskit_algorithms, qiskit.algorithms ni qiskit_machine_learning.optimizers. "
-            "Instala una version compatible de qiskit-machine-learning y qiskit."
-        ) from optimizer_error
-
-    return zz_feature_map, real_amplitudes, StatevectorSampler, VQC, COBYLA
-
-
-def import_ibm_runtime_dependencies():
-    try:
-        from qiskit_ibm_runtime import QiskitRuntimeService, SamplerV2 as Sampler
-    except ImportError as error:
-        raise ImportError(
-            "No se pudo importar qiskit_ibm_runtime. Instala `qiskit-ibm-runtime` para usar IBM Quantum."
-        ) from error
-
-    try:
-        from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
-    except ImportError as error:
-        raise ImportError("No se pudo importar generate_preset_pass_manager desde qiskit.") from error
-
-    return QiskitRuntimeService, Sampler, generate_preset_pass_manager
-
-
-def build_vqc(
-    num_qubits: int,
-    execution_target: str = "simulator",
-    ibm_backend_name: str | None = None,
-    ibm_shots: int = DEFAULT_IBM_SHOTS,
-    logger=print,
-):
-    zz_feature_map, real_amplitudes, StatevectorSampler, VQC, COBYLA = import_quantum_dependencies()
-
-    logger("Construyendo feature map y ansatz...")
-    feature_map = zz_feature_map(feature_dimension=num_qubits, reps=1)
-    ansatz = real_amplitudes(num_qubits=num_qubits, reps=1)
-    optimizer = COBYLA(maxiter=COBYLA_MAXITER)
-    pass_manager = None
-    backend = None
-
-    if execution_target == "ibm_quantum":
-        QiskitRuntimeService, Sampler, generate_preset_pass_manager = import_ibm_runtime_dependencies()
-        service = create_ibm_runtime_service()
-        backend = select_ibm_backend(service=service, num_qubits=num_qubits, backend_name=ibm_backend_name)
-        sampler = Sampler(mode=backend)
-        sampler.options.default_shots = ibm_shots
-        pass_manager = generate_preset_pass_manager(backend=backend, optimization_level=1)
-        logger(f"Backend IBM seleccionado: {backend.name}")
-        logger(f"Shots configurados para IBM Quantum: {ibm_shots}")
-    else:
-        sampler = StatevectorSampler()
-
-    logger("Construyendo clasificador VQC...")
-    vqc = VQC(
-        num_qubits=num_qubits,
-        feature_map=feature_map,
-        ansatz=ansatz,
-        optimizer=optimizer,
-        sampler=sampler,
-        pass_manager=pass_manager,
-    )
-    return vqc, backend
-
-
-def create_ibm_runtime_service():
-    QiskitRuntimeService, _, _ = import_ibm_runtime_dependencies()
-    token = os.environ.get("IBM_QUANTUM_TOKEN")
-    instance = os.environ.get("IBM_QUANTUM_INSTANCE")
-
-    try:
-        if token:
-            return QiskitRuntimeService(
-                channel="ibm_quantum_platform",
-                token=token,
-                instance=instance,
-            )
-        return QiskitRuntimeService(channel="ibm_quantum_platform", instance=instance)
-    except Exception as error:
-        raise RuntimeError(
-            "No se pudo inicializar la cuenta de IBM Quantum. "
-            "Configura IBM_QUANTUM_TOKEN o guarda la cuenta con QiskitRuntimeService.save_account(...)."
-        ) from error
-
-
-def select_ibm_backend(service, num_qubits: int, backend_name: str | None = None):
-    if backend_name:
-        backend = service.backend(backend_name)
-        if getattr(backend, "num_qubits", 0) < num_qubits:
-            raise ValueError(
-                f"El backend {backend_name} no tiene qubits suficientes. "
-                f"Disponibles: {getattr(backend, 'num_qubits', 'desconocido')}, requeridos: {num_qubits}"
-            )
-        return backend
-
-    candidates = [
-        backend
-        for backend in service.backends(simulator=False, operational=True)
-        if getattr(backend, "num_qubits", 0) >= num_qubits
-    ]
-    if not candidates:
-        raise RuntimeError(f"No se encontraron backends IBM operativos con al menos {num_qubits} qubits.")
-
-    return sorted(candidates, key=lambda backend: getattr(backend.status(), "pending_jobs", 10**9))[0]
-
-
-def extract_hardware_diagnostics(backend) -> dict:
-    diagnostics = {
-        "backend_name": getattr(backend, "name", "desconocido"),
-        "backend_version": getattr(backend, "backend_version", None),
-        "num_qubits": getattr(backend, "num_qubits", None),
-        "operational": None,
-        "pending_jobs": None,
-        "basis_gate_count": None,
-        "coupling_edge_count": None,
-        "avg_t1_us": None,
-        "avg_t2_us": None,
-        "avg_frequency_ghz": None,
-        "limitation_flags": [],
-    }
-
-    try:
-        status = backend.status()
-        diagnostics["operational"] = getattr(status, "operational", None)
-        diagnostics["pending_jobs"] = getattr(status, "pending_jobs", None)
-    except Exception:
-        pass
-
-    target = getattr(backend, "target", None)
-    if target is not None:
-        operation_names = getattr(target, "operation_names", None)
-        if operation_names is not None:
-            diagnostics["basis_gate_count"] = len(list(operation_names))
-
-        try:
-            coupling_map = target.build_coupling_map()
-            if coupling_map is not None:
-                diagnostics["coupling_edge_count"] = len(coupling_map.get_edges())
-        except Exception:
-            pass
-
-        qubit_properties = getattr(target, "qubit_properties", None)
-        if qubit_properties:
-            t1_values = [prop.t1 for prop in qubit_properties if prop is not None and getattr(prop, "t1", None) is not None]
-            t2_values = [prop.t2 for prop in qubit_properties if prop is not None and getattr(prop, "t2", None) is not None]
-            frequency_values = [
-                prop.frequency for prop in qubit_properties if prop is not None and getattr(prop, "frequency", None) is not None
-            ]
-            if t1_values:
-                diagnostics["avg_t1_us"] = round(float(np.mean(t1_values) * 1e6), 4)
-            if t2_values:
-                diagnostics["avg_t2_us"] = round(float(np.mean(t2_values) * 1e6), 4)
-            if frequency_values:
-                diagnostics["avg_frequency_ghz"] = round(float(np.mean(frequency_values) / 1e9), 4)
-
-    pending_jobs = diagnostics["pending_jobs"]
-    if pending_jobs is not None and pending_jobs > 10:
-        diagnostics["limitation_flags"].append("queue_pressure")
-    avg_t1_us = diagnostics["avg_t1_us"]
-    avg_t2_us = diagnostics["avg_t2_us"]
-    if avg_t1_us is not None and avg_t1_us < 100:
-        diagnostics["limitation_flags"].append("low_t1")
-    if avg_t2_us is not None and avg_t2_us < 100:
-        diagnostics["limitation_flags"].append("low_t2")
-    if diagnostics["coupling_edge_count"] is not None and diagnostics["num_qubits"] is not None:
-        if diagnostics["coupling_edge_count"] < diagnostics["num_qubits"] - 1:
-            diagnostics["limitation_flags"].append("sparse_connectivity")
-
-    return diagnostics
-
-
-def get_latest_results_path(dataset_source: str, execution_target: str = "simulator") -> Path:
-    if execution_target in {"ibm_quantum", "ibm_validate"}:
-        if dataset_source == "live":
-            return RESULTS_DIR / "quantum_live_hardware_metrics.json"
-        return HARDWARE_RESULTS_PATH
-    if dataset_source == "cicids":
-        return LATEST_RESULTS_PATH
-    return RESULTS_DIR / "quantum_live_simulated_metrics.json"
-
-
-def get_results_path_for_qubits(num_qubits: int, dataset_source: str, execution_target: str = "simulator") -> Path:
-    if execution_target in {"ibm_quantum", "ibm_validate"}:
-        if dataset_source == "live":
-            return RESULTS_DIR / f"quantum_live_hardware_metrics_{num_qubits}q.json"
-        return RESULTS_DIR / f"quantum_hardware_metrics_{num_qubits}q.json"
-    if dataset_source == "cicids":
-        return RESULTS_DIR / f"quantum_simulated_metrics_{num_qubits}q.json"
-    return RESULTS_DIR / f"quantum_live_simulated_metrics_{num_qubits}q.json"
-
-
-def compute_classification_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
-    return {
-        "accuracy": round(accuracy_score(y_true, y_pred), 4),
-        "precision": round(precision_score(y_true, y_pred, zero_division=0), 4),
-        "recall": round(recall_score(y_true, y_pred, zero_division=0), 4),
-        "f1_score": round(f1_score(y_true, y_pred, zero_division=0), 4),
-    }
-
-
-def build_base_metrics(
-    *,
-    dataset_source: str,
-    resolved_dataset_path: Path,
-    num_qubits: int,
-    sample_size: int,
-    test_size: float,
-    execution_target: str,
-    environment_label: str,
-) -> dict:
-    return {
-        "model_name": "Variational Quantum Classifier",
-        "environment": environment_label,
-        "execution_target": execution_target,
-        "dataset_source": dataset_source,
-        "dataset_path": str(resolved_dataset_path),
-        "pca_components": num_qubits,
-        "num_qubits": num_qubits,
-        "sample_size": sample_size,
-        "test_size": test_size,
-    }
-
-
-def select_hardware_validation_subset(
-    X_test: np.ndarray,
-    y_test: np.ndarray,
-    max_samples: int,
-) -> tuple[np.ndarray, np.ndarray]:
-    if max_samples <= 0 or len(y_test) <= max_samples:
-        return X_test, y_test
-
-    desired_samples = max(min(len(y_test), max_samples), len(np.unique(y_test)))
-    splitter = StratifiedShuffleSplit(n_splits=1, test_size=desired_samples, random_state=RANDOM_STATE)
-    _, selected_idx = next(splitter.split(X_test, y_test))
-    return X_test[selected_idx], y_test[selected_idx]
-
-
-def clone_trained_state(source_vqc, target_vqc) -> None:
-    target_vqc._fit_result = copy.deepcopy(source_vqc.fit_result)
-    target_vqc._target_encoder = copy.deepcopy(source_vqc._target_encoder)
-    target_vqc._num_classes = source_vqc._num_classes
-    target_vqc._one_hot = source_vqc._one_hot
-
-
-def load_simulator_baseline_metrics(num_qubits: int, dataset_source: str) -> dict | None:
-    baseline_path = get_results_path_for_qubits(
-        num_qubits,
-        dataset_source=dataset_source,
-        execution_target="simulator",
-    )
-    if not baseline_path.exists():
-        return None
-
-    import json
-
-    with open(baseline_path, "r", encoding="utf-8") as baseline_file:
-        baseline_payload = json.load(baseline_file)
-    return baseline_payload.get("metrics")
-
-
-def add_gap_vs_simulator(metrics: dict, num_qubits: int, dataset_source: str) -> None:
-    baseline_metrics = load_simulator_baseline_metrics(num_qubits=num_qubits, dataset_source=dataset_source)
-    if baseline_metrics:
-        metrics["hardware_gap_vs_simulator"] = {
-            "accuracy_drop": round(float(baseline_metrics.get("accuracy", 0)) - metrics["metrics"]["accuracy"], 4),
-            "f1_drop": round(float(baseline_metrics.get("f1_score", 0)) - metrics["metrics"]["f1_score"], 4),
-        }
 
 
 def parse_args() -> argparse.Namespace:
@@ -414,6 +103,24 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_IBM_VALIDATION_SAMPLES,
         help="Cantidad maxima de muestras del test a validar en IBM cuando execution-target=ibm_validate.",
     )
+    parser.add_argument(
+        "--feature-map-reps",
+        type=int,
+        default=DEFAULT_FEATURE_MAP_REPS,
+        help="Cantidad de repeticiones del feature map.",
+    )
+    parser.add_argument(
+        "--ansatz-reps",
+        type=int,
+        default=DEFAULT_ANSATZ_REPS,
+        help="Cantidad de repeticiones del ansatz.",
+    )
+    parser.add_argument(
+        "--maxiter",
+        type=int,
+        default=COBYLA_MAXITER,
+        help="Cantidad maxima de iteraciones del optimizador COBYLA.",
+    )
     return parser.parse_args()
 
 
@@ -436,6 +143,9 @@ def train_quantum_simulator(
     ibm_backend_name: str | None = None,
     ibm_shots: int = DEFAULT_IBM_SHOTS,
     ibm_validation_samples: int = DEFAULT_IBM_VALIDATION_SAMPLES,
+    feature_map_reps: int = DEFAULT_FEATURE_MAP_REPS,
+    ansatz_reps: int = DEFAULT_ANSATZ_REPS,
+    maxiter: int = COBYLA_MAXITER,
     logger=print,
 ) -> dict:
     if num_qubits not in SUPPORTED_QUBITS:
@@ -466,11 +176,20 @@ def train_quantum_simulator(
         pca_components=num_qubits,
         test_size=test_size,
         random_state=RANDOM_STATE,
+        dataset_source=dataset_source,
     )
 
     logger(f"Columna objetivo detectada: {dataset_bundle.label_column}")
     logger(f"Cantidad de registros usados: {dataset_bundle.sample_size}")
     logger(f"Cantidad de features numericas: {dataset_bundle.feature_count}")
+    logger(
+        f"Configuracion del circuito: feature_map_reps={feature_map_reps}, "
+        f"ansatz_reps={ansatz_reps}, maxiter={maxiter}"
+    )
+    if dataset_bundle.live_curation_report:
+        logger(f"Curacion live aplicada: {dataset_bundle.live_curation_report}")
+    if dataset_bundle.live_proxy_baseline_metrics:
+        logger(f"Baseline proxy live previo al VQC: {dataset_bundle.live_proxy_baseline_metrics}")
     logger(f"Aplicando PCA a {dataset_bundle.pca_components} componentes...")
 
     num_qubits = dataset_bundle.pca_components
@@ -486,6 +205,9 @@ def train_quantum_simulator(
         ibm_backend_name=ibm_backend_name,
         ibm_shots=ibm_shots,
         ibm_validation_samples=ibm_validation_samples,
+        feature_map_reps=feature_map_reps,
+        ansatz_reps=ansatz_reps,
+        maxiter=maxiter,
         logger=logger,
     )
 
@@ -520,6 +242,9 @@ def main():
         ibm_backend_name=args.ibm_backend,
         ibm_shots=args.ibm_shots,
         ibm_validation_samples=args.ibm_validation_samples,
+        feature_map_reps=args.feature_map_reps,
+        ansatz_reps=args.ansatz_reps,
+        maxiter=args.maxiter,
         logger=print,
     )
 
@@ -535,6 +260,9 @@ def run_quantum_experiment(
     ibm_backend_name: str | None,
     ibm_shots: int,
     ibm_validation_samples: int,
+    feature_map_reps: int,
+    ansatz_reps: int,
+    maxiter: int,
     logger,
 ) -> dict:
     if execution_target == "ibm_validate":
@@ -547,6 +275,9 @@ def run_quantum_experiment(
             ibm_backend_name=ibm_backend_name,
             ibm_shots=ibm_shots,
             ibm_validation_samples=ibm_validation_samples,
+            feature_map_reps=feature_map_reps,
+            ansatz_reps=ansatz_reps,
+            maxiter=maxiter,
             logger=logger,
         )
 
@@ -555,6 +286,9 @@ def run_quantum_experiment(
         execution_target=execution_target,
         ibm_backend_name=ibm_backend_name,
         ibm_shots=ibm_shots,
+        feature_map_reps=feature_map_reps,
+        ansatz_reps=ansatz_reps,
+        maxiter=maxiter,
         logger=logger,
     )
 
@@ -574,6 +308,9 @@ def run_quantum_experiment(
         test_size=test_size,
         execution_target=execution_target,
         environment_label=environment_label,
+        feature_map_reps=feature_map_reps,
+        ansatz_reps=ansatz_reps,
+        maxiter=maxiter,
     )
     metrics.update(
         {
@@ -584,6 +321,10 @@ def run_quantum_experiment(
             "confusion_matrix": confusion_matrix(dataset_bundle.y_test, y_pred).tolist(),
         }
     )
+    if dataset_bundle.live_curation_report is not None:
+        metrics["live_curation_report"] = dataset_bundle.live_curation_report
+    if dataset_bundle.live_proxy_baseline_metrics is not None:
+        metrics["live_proxy_baseline_metrics"] = dataset_bundle.live_proxy_baseline_metrics
     if backend is not None:
         metrics["hardware_diagnostics"] = extract_hardware_diagnostics(backend)
         add_gap_vs_simulator(metrics, num_qubits=num_qubits, dataset_source=dataset_source)
@@ -600,10 +341,20 @@ def run_ibm_validation_experiment(
     ibm_backend_name: str | None,
     ibm_shots: int,
     ibm_validation_samples: int,
+    feature_map_reps: int,
+    ansatz_reps: int,
+    maxiter: int,
     logger,
 ) -> dict:
     logger("Entrenando VQC en simulador local para obtener pesos base...")
-    simulator_vqc, _ = build_vqc(num_qubits=num_qubits, execution_target="simulator", logger=logger)
+    simulator_vqc, _ = build_vqc(
+        num_qubits=num_qubits,
+        execution_target="simulator",
+        feature_map_reps=feature_map_reps,
+        ansatz_reps=ansatz_reps,
+        maxiter=maxiter,
+        logger=logger,
+    )
     local_train_start = time.perf_counter()
     simulator_vqc.fit(dataset_bundle.X_train, dataset_bundle.y_train)
     local_training_time = time.perf_counter() - local_train_start
@@ -623,6 +374,9 @@ def run_ibm_validation_experiment(
         execution_target="ibm_quantum",
         ibm_backend_name=ibm_backend_name,
         ibm_shots=ibm_shots,
+        feature_map_reps=feature_map_reps,
+        ansatz_reps=ansatz_reps,
+        maxiter=maxiter,
         logger=logger,
     )
     clone_trained_state(simulator_vqc, hardware_vqc)
@@ -638,6 +392,9 @@ def run_ibm_validation_experiment(
         test_size=test_size,
         execution_target="ibm_validate",
         environment_label="Quantum Hardware Validation",
+        feature_map_reps=feature_map_reps,
+        ansatz_reps=ansatz_reps,
+        maxiter=maxiter,
     )
     metrics.update(
         {
@@ -666,6 +423,10 @@ def run_ibm_validation_experiment(
             "hardware_diagnostics": extract_hardware_diagnostics(backend),
         }
     )
+    if dataset_bundle.live_curation_report is not None:
+        metrics["live_curation_report"] = dataset_bundle.live_curation_report
+    if dataset_bundle.live_proxy_baseline_metrics is not None:
+        metrics["live_proxy_baseline_metrics"] = dataset_bundle.live_proxy_baseline_metrics
     add_gap_vs_simulator(metrics, num_qubits=num_qubits, dataset_source=dataset_source)
     return metrics
 

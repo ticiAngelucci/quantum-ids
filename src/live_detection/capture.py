@@ -50,6 +50,18 @@ def parse_args() -> argparse.Namespace:
         default=1,
         help="Cantidad de ventanas independientes a capturar y guardar como filas separadas.",
     )
+    parser.add_argument(
+        "--scenario",
+        type=str,
+        default=None,
+        help="Escenario opcional del simulador para guardar metadata del lote live.",
+    )
+    parser.add_argument(
+        "--simulator-version",
+        type=str,
+        default=None,
+        help="Version opcional del simulador para guardar metadata del lote live.",
+    )
     return parser.parse_args()
 
 
@@ -103,10 +115,14 @@ def load_packets_from_pcap(pcap_path: Path):
 
 def save_features(features: dict[str, float], output_path: Path, append: bool = False) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    df = pd.DataFrame([features])
-    write_header = not output_path.exists() or not append
-    mode = "a" if append and output_path.exists() else "w"
-    df.to_csv(output_path, index=False, mode=mode, header=write_header)
+    new_row_df = pd.DataFrame([features])
+    if append and output_path.exists():
+        existing_df = pd.read_csv(output_path)
+        existing_df.columns = [str(column).strip() for column in existing_df.columns]
+        combined_df = pd.concat([existing_df, new_row_df], ignore_index=True, sort=False)
+        combined_df.to_csv(output_path, index=False)
+    else:
+        new_row_df.to_csv(output_path, index=False)
     LOGGER.info("Features guardadas en %s", output_path)
 
 
@@ -130,6 +146,10 @@ def main() -> None:
         if args.label is not None:
             features["Label"] = args.label
             LOGGER.info("Etiqueta asignada a la captura: %s", args.label)
+        if args.scenario is not None:
+            features["Scenario"] = args.scenario
+        if args.simulator_version is not None:
+            features["SimulatorVersion"] = args.simulator_version
         LOGGER.info("Resumen extraido: %s", features)
         save_features(
             features,

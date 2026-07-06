@@ -29,6 +29,7 @@ from dashboard.constants import (
 from dashboard.data import load_classical_artifacts, load_quantum_simulated_results
 from dashboard.types import ModelData
 from src.live_detection.compatibility import compare_feature_sets, load_expected_classical_features
+from src.live_detection.feature_engineering import enrich_live_feature_frame
 from src.classical.train_model import convert_to_binary_label, find_label_column
 
 
@@ -310,6 +311,7 @@ def capture_live_monitoring_batch(
     output_path: Path = LIVE_CAPTURE_PATH,
     label: str | None = None,
     scenario: str | None = None,
+    simulator_version: str | None = None,
     append_to_training: bool = False,
     logger=lambda _message: None,
 ) -> pd.DataFrame:
@@ -332,10 +334,12 @@ def capture_live_monitoring_batch(
         output_features = dict(features)
         if scenario is not None:
             output_features["Scenario"] = scenario
+        if simulator_version is not None:
+            output_features["SimulatorVersion"] = simulator_version
         batch_rows.append(output_features)
         save_features(output_features, output_path, append=window_index > 0)
         if append_to_training and label is not None:
-            save_features(features, LIVE_TRAINING_DATASET_PATH, append=True)
+            save_features(output_features, LIVE_TRAINING_DATASET_PATH, append=True)
 
     return pd.DataFrame(batch_rows)
 
@@ -345,6 +349,9 @@ def predict_quantum_live_batch(
     live_df: pd.DataFrame,
     num_qubits: int,
     test_size: float,
+    feature_map_reps: int = 1,
+    ansatz_reps: int = 1,
+    maxiter: int = 50,
     logger=lambda _message: None,
 ) -> dict:
     from src.preprocessing.quantum_preprocessing import prepare_quantum_dataset
@@ -359,12 +366,17 @@ def predict_quantum_live_batch(
         dataset_path=LIVE_TRAINING_DATASET_PATH,
         pca_components=num_qubits,
         test_size=test_size,
+        dataset_source="live",
     )
     training_df = pd.read_csv(LIVE_TRAINING_DATASET_PATH)
     training_df.columns = [str(col).strip() for col in training_df.columns]
     label_column = find_label_column(training_df)
-    expected_features = training_df.drop(columns=[label_column]).select_dtypes(include=[np.number]).columns.tolist()
-    comparison = compare_feature_sets(live_df.columns.tolist(), expected_features)
+    expected_features_df = enrich_live_feature_frame(
+        training_df.drop(columns=[label_column]).select_dtypes(include=[np.number])
+    )
+    expected_features = expected_features_df.columns.tolist()
+    transformed_live_df = enrich_live_feature_frame(live_df.select_dtypes(include=[np.number]))
+    comparison = compare_feature_sets(transformed_live_df.columns.tolist(), expected_features)
     if not comparison["compatible"]:
         raise ValueError(
             "Las features capturadas no coinciden con el dataset live de entrenamiento. "
@@ -372,9 +384,16 @@ def predict_quantum_live_batch(
         )
 
     logger("Entrenando VQC live en simulador para inferencia inmediata...")
-    vqc, _ = build_vqc(num_qubits=num_qubits, execution_target="simulator", logger=logger)
+    vqc, _ = build_vqc(
+        num_qubits=num_qubits,
+        execution_target="simulator",
+        feature_map_reps=feature_map_reps,
+        ansatz_reps=ansatz_reps,
+        maxiter=maxiter,
+        logger=logger,
+    )
     vqc.fit(dataset_bundle.X_train, dataset_bundle.y_train)
-    batch_scaled = dataset_bundle.scaler.transform(live_df[expected_features])
+    batch_scaled = dataset_bundle.scaler.transform(transformed_live_df[expected_features])
     batch_pca = dataset_bundle.pca.transform(batch_scaled)
     predictions = np.asarray(vqc.predict(batch_pca)).astype(int)
     return {

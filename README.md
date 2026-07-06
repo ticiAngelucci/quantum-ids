@@ -18,9 +18,9 @@ app/
 
 src/
   classical/              # entrenamiento y utilidades del modelo clásico
-  live_detection/         # captura live, extracción de features y compatibilidad
+  live_detection/         # captura live, extracción, curación y compatibilidad
   preprocessing/          # limpieza, escalado y PCA para QML
-  quantum/                # entrenamiento VQC y validación IBM
+  quantum/                # configuración, runtime, resultados y entrenamiento VQC
   utils/                  # helpers compartidos
 ```
 
@@ -115,6 +115,7 @@ streamlit run app/app.py --server.address 0.0.0.0 --server.port 8501
 - resultados esperados:
   - `results/quantum_simulated_metrics.json`
   - `results/quantum_simulated_metrics_2q.json`
+  - `results/quantum_simulated_metrics_3q.json`
   - `results/quantum_simulated_metrics_4q.json`
   - `results/quantum_simulated_metrics_6q.json`
   - `results/quantum_simulated_metrics_8q.json`
@@ -123,9 +124,47 @@ streamlit run app/app.py --server.address 0.0.0.0 --server.port 8501
 
 - captura por ventanas: `src/live_detection/capture.py`
 - extracción de features: `src/live_detection/feature_extractor.py`
+- enriquecimiento y curación: `src/live_detection/feature_engineering.py`
+- simulador asumido por la UI: `v2`
+- metadata opcional de captura:
+  - `Scenario`
+  - `SimulatorVersion`
 - dataset experimental: `results/live_training_dataset.csv`
+- baseline comparativo sobre live:
+  - `python -m src.classical.train_live_model`
+- resultados clásicos live:
+  - `results/classical_live_metrics.json`
 - entrenamiento cuántico live:
   - `python -m src.quantum.train_vqc_simulator --dataset-source live --qubits 2`
+
+Si querés aprovechar las mejoras más recientes del flujo `live v2`, conviene reconstruir el CSV desde cero:
+
+```bash
+rm results/live_training_dataset.csv
+```
+
+Después recapturá ventanas nuevas. Las capturas nuevas incluyen features más discriminativas del tráfico `v2` y permiten curar filas inconsistentes según el escenario del simulador.
+
+## Configuración del VQC
+
+El pipeline cuántico hoy se puede ajustar sin tocar código, tanto por CLI como desde el dashboard:
+
+- `qubits`: `2`, `3`, `4`, `6`, `8`
+- `feature_map_reps`
+- `ansatz_reps`
+- `maxiter` de `COBYLA`
+- `test_size`
+
+Ejemplo:
+
+```bash
+python -m src.quantum.train_vqc_simulator \
+  --qubits 4 \
+  --feature-map-reps 1 \
+  --ansatz-reps 2 \
+  --maxiter 100 \
+  --test-size 0.2
+```
 
 ## Dashboard
 

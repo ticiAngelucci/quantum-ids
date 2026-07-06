@@ -17,6 +17,7 @@ DANGER = "#B91C1C"
 RESULTS_DIR = Path("results")
 DATASET_PATH = Path("data/dataset.csv")
 CLASSICAL_RESULTS_PATH = RESULTS_DIR / "classical_metrics.json"
+CLASSICAL_LIVE_RESULTS_PATH = RESULTS_DIR / "classical_live_metrics.json"
 QUANTUM_SIMULATED_RESULTS_PATH = RESULTS_DIR / "quantum_simulated_metrics.json"
 QUANTUM_LIVE_RESULTS_PATH = RESULTS_DIR / "quantum_live_simulated_metrics.json"
 QUANTUM_HARDWARE_RESULTS_PATH = RESULTS_DIR / "quantum_hardware_metrics.json"
@@ -27,7 +28,7 @@ UPLOADED_QUANTUM_DATASET_PATH = RESULTS_DIR / "uploaded_quantum_dataset.csv"
 CLASSICAL_MODEL_PATH = RESULTS_DIR / "random_forest_model.joblib"
 SCALER_PATH = RESULTS_DIR / "scaler.joblib"
 PCA_PATH = RESULTS_DIR / "pca.joblib"
-SUPPORTED_QUANTUM_QUBITS = (2, 4, 6, 8)
+SUPPORTED_QUANTUM_QUBITS = (2, 3, 4, 6, 8)
 SUPPORTED_QUANTUM_DATASET_SOURCES = ("cicids", "live")
 ENABLED_MODEL_OPTIONS = ("Modelo clasico", "Modelo cuantico")
 

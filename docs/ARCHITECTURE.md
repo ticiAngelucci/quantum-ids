@@ -46,6 +46,7 @@ app/app.py
 src/live_detection/
     ├── capture.py
     ├── feature_extractor.py
+    ├── feature_engineering.py
     ├── compatibility.py        # compatibilidad entre features live y modelo clásico
     └── predict_live.py
 ```
@@ -118,12 +119,20 @@ Responsabilidad:
 - ejecutar modo simulador
 - ejecutar validación `IBM`
 - guardar métricas por número de qubits y por fuente de datos
+- separar runtime, configuración y resultados en módulos pequeños
 
 Entradas posibles:
 
 - `data/dataset.csv`
 - `results/live_training_dataset.csv`
 - un CSV explícito pasado por argumento
+
+Submódulos relevantes:
+
+- `config.py`: defaults y contratos de ejecución cuántica
+- `runtime.py`: construcción del `VQC`, imports Qiskit y utilidades IBM
+- `results.py`: métricas, paths y helpers de validación
+- `train_vqc_simulator.py`: orquestador y CLI
 
 ### 4. `src/live_detection`
 
@@ -144,6 +153,7 @@ Módulos relevantes:
 
 - `capture.py`: CLI para captura live o lectura de PCAP
 - `feature_extractor.py`: cálculo de features agregadas por ventana
+- `feature_engineering.py`: enriquecimiento de features y curación de ventanas ambiguas
 - `compatibility.py`: contrato de columnas esperado por el baseline clásico
 - `predict_live.py`: validación de compatibilidad e inferencia clásica solo si las columnas coinciden
 
@@ -174,6 +184,14 @@ Páginas actuales:
 - `demo.py`: simulación simple orientada a explicación
 - `conclusions.py`: cierre ejecutivo del dashboard
 
+La UI hoy también expone ajustes del circuito cuántico:
+
+- `feature_map_reps`
+- `ansatz_reps`
+- `optimizer_maxiter`
+
+Esto permite experimentar sin tocar código ni dejar parámetros importantes escondidos en el backend.
+
 ## Contratos importantes
 
 ### 1. `results/` como frontera de integración
@@ -183,6 +201,7 @@ El proyecto usa `results/` como frontera simple entre entrenamiento, captura y v
 Archivos clave:
 
 - `results/classical_metrics.json`
+- `results/classical_live_metrics.json`
 - `results/random_forest_model.joblib`
 - `results/scaler.joblib`
 - `results/pca.joblib`
@@ -250,6 +269,13 @@ Modos de ejecución:
 - `ibm_validate`
 - `ibm_quantum` (más costoso y dependiente de cuota)
 
+Parámetros de circuito hoy visibles en CLI/UI:
+
+- cantidad de qubits / componentes PCA
+- repeticiones del feature map
+- repeticiones del ansatz
+- iteraciones máximas de `COBYLA`
+
 ## Flujo cuántico live
 
 ```text
@@ -262,6 +288,13 @@ captura / pcap
 ```
 
 El punto clave es que el `VQC live` solo es válido si el modelo fue entrenado con las mismas features que genera la captura live.
+
+El flujo actual de `live` incluye una etapa extra antes del VQC:
+
+1. enriquecimiento de features agregadas
+2. curación de ventanas ambiguas con un proxy clásico out-of-fold
+3. escalado + PCA
+4. entrenamiento/evaluación del VQC
 
 En otras palabras:
 
@@ -324,6 +357,7 @@ El dashboard ya no depende solo de `dict` anónimos:
 Todavía conviene seguir refactorizando:
 
 - partir `app/dashboard/pages/lab.py`, que hoy sigue siendo la pantalla más grande
+- partir `app/dashboard/pages/live.py`, que sigue acumulando demasiada lógica de UI
 - expandir el tipado mas alla del dashboard hacia `src/`
 - limpiar imports duplicados o sobrantes en `src/`
 - documentar contratos de `results/*.json`

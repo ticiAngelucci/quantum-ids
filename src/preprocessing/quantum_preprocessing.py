@@ -5,10 +5,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
 
 from src.classical.train_model import convert_to_binary_label, find_label_column
+from src.live_detection.feature_engineering import curate_live_windows, enrich_live_feature_frame, looks_like_live_feature_frame
 
 
 @dataclass
@@ -23,6 +27,8 @@ class QuantumDatasetBundle:
     sample_size: int
     feature_count: int
     label_column: str
+    live_curation_report: dict | None = None
+    live_proxy_baseline_metrics: dict | None = None
 
 
 def load_and_clean_dataset(dataset_path: Path) -> pd.DataFrame:
@@ -68,6 +74,7 @@ def prepare_quantum_dataset(
     pca_components: int = 4,
     test_size: float = 0.2,
     random_state: int = 42,
+    dataset_source: str | None = None,
 ) -> QuantumDatasetBundle:
     if not 0 < test_size < 1:
         raise ValueError(f"test_size invalido: {test_size}. Debe estar entre 0 y 1.")
@@ -107,11 +114,34 @@ def prepare_quantum_dataset(
     )
 
     y = sampled_df[label_column].apply(convert_to_binary_label).to_numpy()
+    metadata_columns = [column for column in ("Scenario", "SimulatorVersion") if column in sampled_df.columns]
+    metadata_df = sampled_df[metadata_columns].copy() if metadata_columns else None
     X = sampled_df.drop(columns=[label_column]).select_dtypes(include=[np.number])
     X = X.replace([np.inf, -np.inf], np.nan)
-    valid_mask = ~X.isna().any(axis=1)
-    X = X.loc[valid_mask]
-    y = y[valid_mask.to_numpy()]
+
+    live_curation_report = None
+    live_proxy_baseline_metrics = None
+    is_live_dataset = dataset_source == "live" or looks_like_live_feature_frame(X.columns.tolist())
+    if is_live_dataset:
+        X = enrich_live_feature_frame(X)
+        # El dataset live puede evolucionar de version y agregar columnas nuevas.
+        # Para no descartar todas las capturas viejas por schema drift, imputamos
+        # faltantes con 0.0 antes de curar el dataset.
+        X = X.fillna(0.0)
+        valid_mask = np.ones(len(X), dtype=bool)
+    else:
+        valid_mask = ~X.isna().any(axis=1)
+        X = X.loc[valid_mask]
+        y = y[valid_mask.to_numpy()]
+
+    if is_live_dataset:
+        X, y, curation_report = curate_live_windows(
+            X.reset_index(drop=True),
+            y,
+            metadata=metadata_df,
+            random_state=random_state,
+        )
+        live_curation_report = curation_report.__dict__
 
     class_counts_after_clean = pd.Series(y).value_counts().to_dict()
     benign_after_clean = int(class_counts_after_clean.get(0, 0))
@@ -170,6 +200,29 @@ def prepare_quantum_dataset(
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
 
+    if is_live_dataset:
+        proxy_model = Pipeline(
+            [
+                ("scaler", StandardScaler()),
+                (
+                    "classifier",
+                    LogisticRegression(
+                        max_iter=4000,
+                        class_weight="balanced",
+                        random_state=random_state,
+                    ),
+                ),
+            ]
+        )
+        proxy_model.fit(X_train, y_train)
+        proxy_predictions = proxy_model.predict(X_test)
+        live_proxy_baseline_metrics = {
+            "accuracy": round(float(accuracy_score(y_test, proxy_predictions)), 4),
+            "precision": round(float(precision_score(y_test, proxy_predictions, zero_division=0)), 4),
+            "recall": round(float(recall_score(y_test, proxy_predictions, zero_division=0)), 4),
+            "f1_score": round(float(f1_score(y_test, proxy_predictions, zero_division=0)), 4),
+        }
+
     pca = PCA(n_components=pca_components)
     X_train_pca = pca.fit_transform(X_train_scaled)
     X_test_pca = pca.transform(X_test_scaled)
@@ -182,7 +235,9 @@ def prepare_quantum_dataset(
         scaler=scaler,
         pca=pca,
         pca_components=pca_components,
-        sample_size=len(sampled_df),
+        sample_size=len(X),
         feature_count=X.shape[1],
         label_column=label_column,
+        live_curation_report=live_curation_report,
+        live_proxy_baseline_metrics=live_proxy_baseline_metrics,
     )

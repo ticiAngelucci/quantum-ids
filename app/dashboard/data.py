@@ -6,6 +6,7 @@ import joblib
 import numpy as np
 
 from dashboard.constants import (
+    CLASSICAL_LIVE_RESULTS_PATH,
     CLASSICAL_MODEL_PATH,
     CLASSICAL_RESULTS_PATH,
     LIVE_TRAINING_DATASET_PATH,
@@ -40,6 +41,30 @@ def load_classical_results() -> dict | None:
         "confusion_matrix": np.array(confusion),
         "model_name": payload.get("model_name", "Random Forest"),
         "pca_components": payload.get("pca_components"),
+    }
+
+
+def load_classical_live_results() -> dict | None:
+    if not CLASSICAL_LIVE_RESULTS_PATH.exists():
+        return None
+    with open(CLASSICAL_LIVE_RESULTS_PATH, "r", encoding="utf-8") as results_file:
+        payload = json.load(results_file)
+
+    metrics = payload.get("metrics")
+    confusion = payload.get("confusion_matrix")
+    if not metrics or confusion is None:
+        return None
+
+    return {
+        "accuracy": float(metrics["accuracy"]),
+        "precision": float(metrics["precision"]),
+        "recall": float(metrics["recall"]),
+        "f1_score": float(metrics["f1_score"]),
+        "confusion_matrix": np.array(confusion),
+        "model_name": payload.get("model_name", "Random Forest Live Baseline"),
+        "sample_size": payload.get("sample_size"),
+        "test_size": payload.get("test_size"),
+        "live_curation_report": payload.get("live_curation_report"),
     }
 
 

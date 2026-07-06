@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from io import BytesIO
 
 import numpy as np
@@ -13,23 +14,32 @@ from dashboard.types import ModelData, QuantumDatasetSource
 from dashboard.ui import render_info_card, render_metric_card, section_header
 
 
+def _load_train_quantum_simulator():
+    module = importlib.import_module("src.quantum.train_vqc_simulator")
+    module = importlib.reload(module)
+    return module.train_quantum_simulator
+
+
 def _render_quantum_lab(
     model_data: ModelData,
     selected_quantum_qubits: int,
     selected_quantum_dataset_source: QuantumDatasetSource,
 ) -> None:
-    from src.quantum.train_vqc_simulator import train_quantum_simulator
+    train_quantum_simulator = _load_train_quantum_simulator()
 
     selected_quantum_execution_target = st.session_state.get("selected_quantum_execution_target", "simulator")
     selected_quantum_test_size = float(st.session_state.get("selected_quantum_test_size", 0.2))
     selected_quantum_data_source = st.session_state.get("quantum_cicids_data_source", "Usar data/dataset.csv")
+    selected_quantum_feature_map_reps = int(st.session_state.get("selected_quantum_feature_map_reps", 1))
+    selected_quantum_ansatz_reps = int(st.session_state.get("selected_quantum_ansatz_reps", 1))
+    selected_quantum_maxiter = int(st.session_state.get("selected_quantum_maxiter", 50))
     left, right = st.columns([1.15, 1])
     with left:
         st.markdown("#### VQC")
         st.caption("Aca se ejecutan pruebas controladas sobre datasets ya preparados. Esta seccion sirve para comparar el baseline clasico y el flujo cuantico en un entorno mas estable.")
         uploaded_quantum_file = None
         selected_quantum_data_source = st.radio(
-            "Origen de datos",
+            "Dataset de entrada",
             ["Usar data/dataset.csv", "Subir CSV propio"],
             horizontal=True,
             key="quantum_cicids_data_source",
@@ -57,6 +67,31 @@ def _render_quantum_lab(
             key="quantum_test_size_slider",
         )
         st.session_state["selected_quantum_test_size"] = selected_quantum_test_size
+        with st.expander("Ajustes del circuito cuantico", expanded=False):
+            selected_quantum_feature_map_reps = st.select_slider(
+                "Repeticiones del feature map",
+                options=[1, 2, 3],
+                value=selected_quantum_feature_map_reps,
+                key="quantum_feature_map_reps_slider",
+            )
+            selected_quantum_ansatz_reps = st.select_slider(
+                "Repeticiones del ansatz",
+                options=[1, 2, 3],
+                value=selected_quantum_ansatz_reps,
+                key="quantum_ansatz_reps_slider",
+            )
+            selected_quantum_maxiter = st.select_slider(
+                "Iteraciones maximas de COBYLA",
+                options=[25, 50, 75, 100, 150],
+                value=selected_quantum_maxiter,
+                key="quantum_maxiter_slider",
+            )
+            st.caption(
+                "Mas repeticiones o mas iteraciones pueden mejorar el ajuste, pero tambien aumentar el tiempo y el riesgo de sobreajuste."
+            )
+        st.session_state["selected_quantum_feature_map_reps"] = selected_quantum_feature_map_reps
+        st.session_state["selected_quantum_ansatz_reps"] = selected_quantum_ansatz_reps
+        st.session_state["selected_quantum_maxiter"] = selected_quantum_maxiter
         selected_ibm_validation_samples = int(st.session_state.get("selected_ibm_validation_samples", 16))
         if selected_quantum_execution_target == "ibm_validate":
             selected_ibm_validation_samples = st.select_slider(
@@ -103,18 +138,24 @@ def _render_quantum_lab(
         status_label = "Resultado real" if quantum_results_path.exists() else "Pendiente"
         render_info_card("Estado del experimento", status_label, f"Se actualiza cuando se genera el archivo {quantum_results_path.as_posix()}.")
         st.write("")
-        render_info_card("Origen de datos", "CICIDS2017 o CSV propio", "Esta seccion trabaja sobre datasets ya preparados. El flujo live vive separado en la seccion Live.")
+        render_info_card("Entrada del experimento", "CICIDS2017 o CSV propio", "Esta seccion trabaja sobre datasets ya preparados. El flujo live vive separado en la seccion Live.")
         st.write("")
         render_info_card("Dataset elegido", selected_quantum_data_source.replace("Usar ", ""), "Podes usar el dataset local o subir un CSV propio solo para este experimento cuantico.")
+        st.write("")
+        render_info_card(
+            "Circuito actual",
+            f"FM x{selected_quantum_feature_map_reps} · Ansatz x{selected_quantum_ansatz_reps}",
+            f"Optimizador COBYLA con maxiter={selected_quantum_maxiter}.",
+        )
         st.write("")
         render_info_card(
             "Comando en terminal",
             (
                 (
-                    f"python -m src.quantum.train_vqc_simulator --execution-target ibm_validate --qubits {selected_quantum_qubits} --test-size {selected_quantum_test_size} --ibm-validation-samples {selected_ibm_validation_samples}"
+                    f"python -m src.quantum.train_vqc_simulator --execution-target ibm_validate --qubits {selected_quantum_qubits} --test-size {selected_quantum_test_size} --ibm-validation-samples {selected_ibm_validation_samples} --feature-map-reps {selected_quantum_feature_map_reps} --ansatz-reps {selected_quantum_ansatz_reps} --maxiter {selected_quantum_maxiter}"
                 )
                 if selected_quantum_execution_target == "ibm_validate"
-                else f"python -m src.quantum.train_vqc_simulator --qubits {selected_quantum_qubits} --test-size {selected_quantum_test_size}"
+                else f"python -m src.quantum.train_vqc_simulator --qubits {selected_quantum_qubits} --test-size {selected_quantum_test_size} --feature-map-reps {selected_quantum_feature_map_reps} --ansatz-reps {selected_quantum_ansatz_reps} --maxiter {selected_quantum_maxiter}"
             ),
             "La misma prueba que tambien puede ejecutarse fuera del dashboard.",
         )
@@ -147,6 +188,9 @@ def _render_quantum_lab(
                     test_size=selected_quantum_test_size,
                     execution_target=selected_quantum_execution_target,
                     ibm_validation_samples=selected_ibm_validation_samples,
+                    feature_map_reps=selected_quantum_feature_map_reps,
+                    ansatz_reps=selected_quantum_ansatz_reps,
+                    maxiter=selected_quantum_maxiter,
                     logger=ui_logger,
                 )
 
@@ -209,7 +253,7 @@ def _render_classical_lab(model_data: ModelData) -> None:
     with left:
         st.markdown("#### Baseline clasico")
         st.caption("Aca se prueba el modelo clasico ya entrenado. Sirve como referencia principal porque hoy es el enfoque mas estable del sistema.")
-        source = st.radio("Origen de datos", ["Usar data/dataset.csv", "Subir CSV propio"], horizontal=True, key="classical_data_source")
+        source = st.radio("Dataset de entrada", ["Usar data/dataset.csv", "Subir CSV propio"], horizontal=True, key="classical_data_source")
         uploaded_file = None
         if source == "Subir CSV propio":
             uploaded_file = st.file_uploader("CSV para evaluar", type=["csv"], key="classical_csv_uploader")

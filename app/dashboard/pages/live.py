@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib
+
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -11,45 +13,183 @@ from dashboard.analytics import (
     predict_quantum_live_batch,
 )
 from dashboard.constants import LIVE_CAPTURE_PATH, LIVE_TRAINING_DATASET_PATH
-from dashboard.data import get_quantum_hardware_results_path, get_quantum_results_path
+from dashboard.data import get_quantum_hardware_results_path, get_quantum_results_path, load_classical_live_results
 from dashboard.types import ModelData
 from dashboard.ui import render_info_card, render_metric_card, section_header
 
 
+SIMULATOR_CONFIG = {
+    "label": "Simulador v2",
+    "script": "../01_attack-scrapy_v2.py",
+    "summary": "Versión avanzada con variación de tasa, ataque híbrido, tráfico de fondo y ejecución paralela.",
+}
+
+LIVE_DEFAULT_FEATURE_MAP_REPS = 2
+LIVE_DEFAULT_ANSATZ_REPS = 2
+LIVE_DEFAULT_MAXITER = 100
+
+SIMULATOR_SCENARIOS = {
+    "Sin escenario": {
+        "suggested_label": None,
+        "category": "manual",
+        "summary": "Usalo solo si no querés documentar el lote o si vas a etiquetarlo manualmente.",
+    },
+    "TCP SYN Flood Avanzado": {
+        "suggested_label": "attack",
+        "category": "attack",
+        "summary": "Ataque TCP con variación de tasa y spoofing de IPs. Sirve para entrenar patrones de conexiones half-open.",
+    },
+    "UDP Flood con payload variable": {
+        "suggested_label": "attack",
+        "category": "attack",
+        "summary": "Inundación UDP con payload variable y puertos comunes de servicios expuestos.",
+    },
+    "ICMP Flood": {
+        "suggested_label": "attack",
+        "category": "attack",
+        "summary": "Flood ICMP de alta tasa para saturación básica del objetivo.",
+    },
+    "Ataque Hibrido": {
+        "suggested_label": "attack",
+        "category": "attack",
+        "summary": "Secuencia multi-vector TCP/UDP/ICMP pensada para simular campañas más realistas.",
+    },
+    "Ataques Paralelos": {
+        "suggested_label": "attack",
+        "category": "attack",
+        "summary": "Prueba de estrés con múltiples ataques concurrentes. Genera la firma más agresiva del simulador.",
+    },
+    "Generar Trafico de Fondo": {
+        "suggested_label": "benign",
+        "category": "benign",
+        "summary": "Tráfico de fondo HTTP/DNS para construir ventanas benignas más realistas.",
+    },
+    "Configuracion avanzada": {
+        "suggested_label": None,
+        "category": "manual",
+        "summary": "Modo abierto: elegí la etiqueta manualmente según el experimento que realmente ejecutes.",
+    },
+}
+
+LIVE_CAPTURE_PRESETS = {
+    "rapida": {
+        "label": "Prueba rapida",
+        "duration": 2,
+        "windows": 10,
+        "summary": "Sirve para validar que el flujo funciona, pero normalmente no alcanza para entrenar bien el VQC live.",
+    },
+    "recomendada": {
+        "label": "Dataset recomendado",
+        "duration": 2,
+        "windows": 40,
+        "summary": "Punto de partida razonable para empezar a separar mejor benign y attack sin hacer una captura excesivamente larga.",
+    },
+    "robusta": {
+        "label": "Dataset robusto",
+        "duration": 2,
+        "windows": 80,
+        "summary": "Conviene cuando queres acercarte a un dataset live mas estable y reducir la sensibilidad del VQC al split.",
+    },
+}
+
+
+def _resolve_suggested_label(selected_mode: str, selected_scenario: str) -> str | None:
+    if selected_mode == "Sin etiqueta":
+        return None
+    if selected_mode == "Etiqueta sugerida por escenario":
+        return SIMULATOR_SCENARIOS.get(selected_scenario, {}).get("suggested_label")
+    return selected_mode
+
+
+def _load_train_quantum_simulator():
+    module = importlib.import_module("src.quantum.train_vqc_simulator")
+    module = importlib.reload(module)
+    return module.train_quantum_simulator
+
+
 def _render_live_monitoring(selected_quantum_qubits: int) -> None:
-    scenario_options = [
-        "Sin escenario",
-        "TCP SYN Flood",
-        "UDP Flood",
-        "ICMP Flood",
-        "Ataque Multi-Fuente",
-        "Modo Experto",
-    ]
     st.markdown("#### Captura live")
     st.caption(
-        "Este bloque automatiza la captura por ventanas. No lanza ataques: solo escucha trafico, resume features y guarda el lote para el experimento cuantico live."
+        "Este bloque automatiza la captura por ventanas. No lanza ataques: solo escucha trafico, resume features y guarda el lote para el experimento cuantico live usando el simulador avanzado v2 como referencia de laboratorio."
     )
+    scenario_options = list(SIMULATOR_SCENARIOS.keys())
     monitor_left, monitor_right = st.columns([1.25, 1])
     with monitor_left:
-        live_duration = st.number_input("Duracion por ventana (segundos)", min_value=1, max_value=60, value=2, step=1, key="live_monitor_duration")
-        live_windows = st.number_input("Cantidad de ventanas", min_value=1, max_value=100, value=5, step=1, key="live_monitor_windows")
+        selected_preset = st.selectbox(
+            "Preset experimental",
+            options=list(LIVE_CAPTURE_PRESETS.keys()),
+            index=1,
+            format_func=lambda key: LIVE_CAPTURE_PRESETS[key]["label"],
+            key="live_capture_preset",
+        )
+        preset_config = LIVE_CAPTURE_PRESETS[selected_preset]
+        last_applied_preset = st.session_state.get("live_capture_preset_applied")
+        if last_applied_preset != selected_preset:
+            st.session_state["live_monitor_duration"] = preset_config["duration"]
+            st.session_state["live_monitor_windows"] = preset_config["windows"]
+            st.session_state["live_capture_preset_applied"] = selected_preset
+        st.caption(preset_config["summary"])
+        live_duration = st.number_input(
+            "Duracion por ventana (segundos)",
+            min_value=1,
+            max_value=60,
+            value=int(st.session_state.get("live_monitor_duration", preset_config["duration"])),
+            step=1,
+            key="live_monitor_duration",
+        )
+        live_windows = st.number_input(
+            "Cantidad de ventanas",
+            min_value=1,
+            max_value=200,
+            value=int(st.session_state.get("live_monitor_windows", preset_config["windows"])),
+            step=1,
+            key="live_monitor_windows",
+        )
         live_iface = st.text_input("Interfaz de red (ej: lo, wlo1, enp3s0)", value="", placeholder="Ej: lo", key="live_monitor_iface")
         live_count = st.number_input("Limite de paquetes por ventana", min_value=0, max_value=100000, value=0, step=10, key="live_monitor_count")
-        live_label = st.selectbox("Guardar este lote como", options=["Sin etiqueta", "benign", "attack"], index=0, key="live_monitor_label")
         live_scenario = st.selectbox("Escenario de laboratorio", options=scenario_options, index=0, key="live_monitor_scenario")
+        scenario_metadata = SIMULATOR_SCENARIOS[live_scenario]
+        live_label_mode = st.selectbox(
+            "Guardar este lote como",
+            options=["Etiqueta sugerida por escenario", "Sin etiqueta", "benign", "attack"],
+            index=0,
+            key="live_monitor_label",
+        )
+        live_label = _resolve_suggested_label(live_label_mode, live_scenario)
         append_to_training = live_label in {"benign", "attack"}
         run_live_monitoring = st.button("Capturar lote live", width="stretch", type="primary", key="live_monitor_run")
+        if live_label_mode == "Etiqueta sugerida por escenario" and live_label is None:
+            st.caption("Este escenario no tiene etiqueta automática. Elegí `benign` o `attack` manualmente si querés sumar el lote al dataset.")
+        elif live_label_mode in {"benign", "attack"} and scenario_metadata["suggested_label"] and live_label != scenario_metadata["suggested_label"]:
+            st.warning(
+                f"El escenario `{live_scenario}` suele etiquetarse como `{scenario_metadata['suggested_label']}`. "
+                f"Vas a guardarlo manualmente como `{live_label}`."
+            )
     with monitor_right:
+        render_info_card("Preset activo", preset_config["label"], preset_config["summary"])
+        st.write("")
+        render_info_card("Version activa", SIMULATOR_CONFIG["label"], SIMULATOR_CONFIG["summary"])
+        st.write("")
         render_info_card("Archivo de salida", LIVE_CAPTURE_PATH.as_posix(), "Cada lote capturado desde el front se guarda aca.")
         st.write("")
         render_info_card("Interfaz de red", "No es una URL", "Este campo espera una interfaz del sistema como lo, wlo1 o enp3s0. No se pone localhost:8501.")
         st.write("")
-        render_info_card("Escenario elegido", live_scenario, "Sirve para documentar el lote capturado. No ejecuta el script de ataque desde el dashboard.")
+        render_info_card(
+            "Escenario tecnico",
+            live_scenario,
+            scenario_metadata["summary"],
+        )
+        st.write("")
+        render_info_card(
+            "Etiqueta sugerida",
+            live_label or "manual",
+            f"Script asociado: {SIMULATOR_CONFIG['script']}. Esta sugerencia sale del manual del simulador v2.",
+        )
 
     if run_live_monitoring:
         progress_placeholder = st.empty()
         try:
-            live_monitor_label_value = None if live_label == "Sin etiqueta" else live_label
+            live_monitor_label_value = live_label
             live_monitor_scenario_value = None if live_scenario == "Sin escenario" else live_scenario
 
             def live_logger(message: str) -> None:
@@ -63,6 +203,7 @@ def _render_live_monitoring(selected_quantum_qubits: int) -> None:
                     count=int(live_count),
                     label=live_monitor_label_value,
                     scenario=live_monitor_scenario_value,
+                    simulator_version=SIMULATOR_CONFIG["label"],
                     append_to_training=append_to_training,
                     logger=live_logger,
                 )
@@ -72,6 +213,7 @@ def _render_live_monitoring(selected_quantum_qubits: int) -> None:
                 "rows": int(len(live_batch_df)),
                 "label": live_monitor_label_value,
                 "scenario": live_monitor_scenario_value,
+                "simulator_version": SIMULATOR_CONFIG["label"],
                 "saved_to_training": append_to_training,
                 "output_path": LIVE_CAPTURE_PATH.as_posix(),
             }
@@ -83,6 +225,9 @@ def _render_live_monitoring(selected_quantum_qubits: int) -> None:
                     live_df=live_batch_df.select_dtypes(include=[np.number]),
                     num_qubits=selected_quantum_qubits,
                     test_size=selected_quantum_test_size,
+                    feature_map_reps=int(st.session_state.get("selected_quantum_feature_map_reps_live", 1)),
+                    ansatz_reps=int(st.session_state.get("selected_quantum_ansatz_reps_live", 1)),
+                    maxiter=int(st.session_state.get("selected_quantum_maxiter_live", 50)),
                     logger=live_logger,
                 )
                 monitor_result["prediction_result"] = prediction_result
@@ -104,6 +249,8 @@ def _render_live_monitoring(selected_quantum_qubits: int) -> None:
     live_monitor_results = st.session_state.get("live_monitor_results")
     if live_monitor_results:
         st.success(f"Lote live capturado: {live_monitor_results['rows']} ventanas guardadas en {live_monitor_results['output_path']}.")
+        if live_monitor_results.get("simulator_version"):
+            st.caption(f"Version de simulador asociada al lote: {live_monitor_results['simulator_version']}.")
         if live_monitor_results.get("scenario"):
             st.caption(f"Escenario asociado al lote: {live_monitor_results['scenario']}.")
         if live_monitor_results.get("saved_to_training"):
@@ -124,7 +271,7 @@ def _render_live_monitoring(selected_quantum_qubits: int) -> None:
 
 
 def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None:
-    from src.quantum.train_vqc_simulator import train_quantum_simulator
+    train_quantum_simulator = _load_train_quantum_simulator()
 
     section_header(
         "Live",
@@ -147,6 +294,7 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
             <div class="card-help">
                 Esta seccion no ejecuta el script de ataque. El generador de trafico sigue corriendo por separado en laboratorio.
                 La UI se ocupa de capturar, resumir, guardar el lote y mostrar resultados del flujo cuantico live.
+                El dashboard ahora asume solo el simulador avanzado v2 y usa sus escenarios para sugerir etiquetas mas consistentes.
             </div>
         </div>
         """,
@@ -158,6 +306,13 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
     st.write("")
     st.markdown("#### Estado del dataset live")
     selected_quantum_test_size = float(st.session_state.get("selected_quantum_test_size", 0.2))
+    selected_quantum_feature_map_reps = int(
+        st.session_state.get("selected_quantum_feature_map_reps_live", LIVE_DEFAULT_FEATURE_MAP_REPS)
+    )
+    selected_quantum_ansatz_reps = int(
+        st.session_state.get("selected_quantum_ansatz_reps_live", LIVE_DEFAULT_ANSATZ_REPS)
+    )
+    selected_quantum_maxiter = int(st.session_state.get("selected_quantum_maxiter_live", LIVE_DEFAULT_MAXITER))
     live_dataset_summary = inspect_live_quantum_dataset(test_size=selected_quantum_test_size)
     status_cols = st.columns(4)
     with status_cols[0]:
@@ -196,6 +351,28 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
             key="live_quantum_test_size_slider",
         )
         st.session_state["selected_quantum_test_size"] = selected_quantum_test_size
+        with st.expander("Ajustes del circuito cuantico live", expanded=False):
+            selected_quantum_feature_map_reps = st.select_slider(
+                "Repeticiones del feature map",
+                options=[1, 2, 3],
+                value=selected_quantum_feature_map_reps,
+                key="live_quantum_feature_map_reps_slider",
+            )
+            selected_quantum_ansatz_reps = st.select_slider(
+                "Repeticiones del ansatz",
+                options=[1, 2, 3],
+                value=selected_quantum_ansatz_reps,
+                key="live_quantum_ansatz_reps_slider",
+            )
+            selected_quantum_maxiter = st.select_slider(
+                "Iteraciones maximas de COBYLA",
+                options=[25, 50, 75, 100, 150],
+                value=selected_quantum_maxiter,
+                key="live_quantum_maxiter_slider",
+            )
+        st.session_state["selected_quantum_feature_map_reps_live"] = selected_quantum_feature_map_reps
+        st.session_state["selected_quantum_ansatz_reps_live"] = selected_quantum_ansatz_reps
+        st.session_state["selected_quantum_maxiter_live"] = selected_quantum_maxiter
         selected_ibm_validation_samples = int(st.session_state.get("selected_ibm_validation_samples", 16))
         if selected_quantum_execution_target == "ibm_validate":
             selected_ibm_validation_samples = st.select_slider(
@@ -234,9 +411,21 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
         render_info_card("Qubits elegidos", str(selected_quantum_qubits), "Cantidad actual de qubits para este experimento live.")
         st.write("")
         render_info_card(
+            "Circuito actual",
+            f"FM x{selected_quantum_feature_map_reps} · Ansatz x{selected_quantum_ansatz_reps}",
+            f"COBYLA con maxiter={selected_quantum_maxiter}.",
+        )
+        st.write("")
+        render_info_card(
             "Capacidad del dataset",
             f"hasta {live_dataset_summary['max_supported_qubits']}q",
             "El dataset live limita cuántos qubits pueden entrenarse según las filas de entrenamiento disponibles.",
+        )
+        st.write("")
+        render_info_card(
+            "Preset recomendado",
+            "FM x2 · Ansatz x2 · COBYLA 100",
+            "Es la mejor configuración observada hasta ahora para el flujo live v2 sin tocar el backend.",
         )
         if selected_quantum_execution_target == "ibm_validate":
             st.write("")
@@ -255,6 +444,9 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
                     test_size=selected_quantum_test_size,
                     execution_target=selected_quantum_execution_target,
                     ibm_validation_samples=selected_ibm_validation_samples,
+                    feature_map_reps=selected_quantum_feature_map_reps,
+                    ansatz_reps=selected_quantum_ansatz_reps,
+                    maxiter=selected_quantum_maxiter,
                     logger=ui_logger,
                 )
 
@@ -280,6 +472,26 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
         render_info_card("Qubits elegidos", str(selected_quantum_qubits), "Cantidad actual de qubits configurada para el experimento live.")
     with info_cols[2]:
         render_info_card("IBM validate", "Disponible", "Si queres medir hardware real, esa opcion sigue en la seccion Experimentar del VQC.")
+
+    classical_live_results = load_classical_live_results()
+    if classical_live_results is not None:
+        st.write("")
+        st.markdown("#### Comparacion contra baseline live")
+        compare_cols = st.columns(4)
+        with compare_cols[0]:
+            render_metric_card("RF live Accuracy", classical_live_results["accuracy"], "Baseline clasico sobre el mismo dataset live")
+        with compare_cols[1]:
+            render_metric_card("RF live Precision", classical_live_results["precision"], "Misma fuente de datos")
+        with compare_cols[2]:
+            render_metric_card("RF live Recall", classical_live_results["recall"], "Misma fuente de datos")
+        with compare_cols[3]:
+            render_metric_card("RF live F1", classical_live_results["f1_score"], "Misma fuente de datos")
+        live_report = classical_live_results.get("live_curation_report") or {}
+        if live_report:
+            st.caption(
+                f"Baseline live entrenado sobre {live_report.get('curated_rows', 'n/d')} filas curadas "
+                f"(de {live_report.get('original_rows', 'n/d')} brutas)."
+            )
 
     live_runtime_results = st.session_state.get("quantum_lab_results")
     live_runtime_qubits = st.session_state.get("quantum_lab_results_qubits")
@@ -308,6 +520,18 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
             width="stretch",
             key=f"live_confusion_chart_{selected_quantum_qubits}q",
         )
+        if "live_curation_report" in display_results:
+            report = display_results["live_curation_report"]
+            st.caption(
+                f"Entrenamiento live curado: {report.get('curated_rows', 'n/d')} filas utiles sobre "
+                f"{report.get('original_rows', 'n/d')} capturas brutas."
+            )
+        if "live_proxy_baseline_metrics" in display_results:
+            proxy = display_results["live_proxy_baseline_metrics"]
+            st.caption(
+                f"Proxy clasico previo al VQC sobre el split actual: "
+                f"Acc {proxy.get('accuracy', 0):.2%} | F1 {proxy.get('f1_score', 0):.2%}."
+            )
     else:
         command = f"python -m src.quantum.train_vqc_simulator --dataset-source live --qubits {selected_quantum_qubits} --test-size {selected_quantum_test_size}"
         if selected_quantum_qubits > live_dataset_summary["max_supported_qubits"]:
