@@ -2,6 +2,7 @@ import argparse
 import sys
 import time
 from pathlib import Path
+import joblib
 
 import numpy as np
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score, recall_score
@@ -45,7 +46,7 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=DEFAULT_QUBITS,
         choices=SUPPORTED_QUBITS,
-        help="Cantidad de qubits y componentes PCA a utilizar.",
+        help="Cantidad de qubits a utilizar.",
     )
     parser.add_argument(
         "--dataset-source",
@@ -131,7 +132,15 @@ def resolve_dataset_path(dataset_source: str, dataset_path: Path | None) -> Path
         return DATASET_PATH
     return LIVE_DATASET_PATH
 
-
+def get_dynamic_shots(num_qubits: int, base_shots: int) -> int:
+    """Escala los shots proporcionalmente al número de qubits para evitar pérdida por ruido estadístico."""
+    if num_qubits <= 3:
+        return max(base_shots, 1024)
+    elif num_qubits <= 6:
+        return max(base_shots, 2048)
+    else:
+        return max(base_shots, 4096)
+    
 def train_quantum_simulator(
     num_qubits: int = DEFAULT_QUBITS,
     dataset_source: str = "cicids",
@@ -173,11 +182,16 @@ def train_quantum_simulator(
         dataset_path=resolved_dataset_path,
         benign_samples=benign_samples,
         attack_samples=attack_samples,
-        pca_components=num_qubits,
+        qubits=num_qubits,
         test_size=test_size,
         random_state=RANDOM_STATE,
         dataset_source=dataset_source,
     )
+
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    joblib.dump(dataset_bundle.quantum_selector, RESULTS_DIR / "quantum_selector.joblib")
+    joblib.dump(dataset_bundle.quantum_scaler, RESULTS_DIR / "quantum_scaler.joblib")
+    logger("Artefactos de preprocesamiento (selector y scaler) guardados en results/.")
 
     logger(f"Columna objetivo detectada: {dataset_bundle.label_column}")
     logger(f"Cantidad de registros usados: {dataset_bundle.sample_size}")
@@ -190,12 +204,18 @@ def train_quantum_simulator(
         logger(f"Curacion live aplicada: {dataset_bundle.live_curation_report}")
     if dataset_bundle.live_proxy_baseline_metrics:
         logger(f"Baseline proxy live previo al VQC: {dataset_bundle.live_proxy_baseline_metrics}")
-    logger(f"Aplicando PCA a {dataset_bundle.pca_components} componentes...")
+    
+    logger(f"Seleccionando las mejores features para {dataset_bundle.qubits} qubits...")
 
-    num_qubits = dataset_bundle.pca_components
-    logger(f"Numero de qubits: {num_qubits}")
+    num_qubits = dataset_bundle.qubits
+    logger(f"Numero de qubits final: {num_qubits}")
     logger("Construccion del circuito cuantico...")
-    metrics = run_quantum_experiment(
+    
+    adjusted_ibm_shots = get_dynamic_shots(num_qubits, ibm_shots)
+    
+    logger(f"Configuración de shots adaptativa para {num_qubits} qubits: {adjusted_ibm_shots} shots.")
+
+    metrics, trained_vqc = run_quantum_experiment(
         dataset_bundle=dataset_bundle,
         dataset_source=dataset_source,
         resolved_dataset_path=resolved_dataset_path,
@@ -203,13 +223,16 @@ def train_quantum_simulator(
         test_size=test_size,
         execution_target=execution_target,
         ibm_backend_name=ibm_backend_name,
-        ibm_shots=ibm_shots,
+        ibm_shots=adjusted_ibm_shots, 
         ibm_validation_samples=ibm_validation_samples,
         feature_map_reps=feature_map_reps,
         ansatz_reps=ansatz_reps,
         maxiter=maxiter,
         logger=logger,
     )
+
+    trained_vqc.save(str(RESULTS_DIR / "vqc_model.model"))
+    logger("Modelo VQC guardado exitosamente usando Qiskit en results/vqc_model.model.")
 
     specific_results_path = get_results_path_for_qubits(
         num_qubits,
@@ -225,7 +248,6 @@ def train_quantum_simulator(
 
     logger(f"Resultados guardados en {specific_results_path}")
     logger(f"Copia actualizada en {latest_results_path}")
-    logger(str(metrics))
     return metrics
 
 
@@ -264,7 +286,7 @@ def run_quantum_experiment(
     ansatz_reps: int,
     maxiter: int,
     logger,
-) -> dict:
+) -> tuple[dict, object]:
     if execution_target == "ibm_validate":
         return run_ibm_validation_experiment(
             dataset_bundle=dataset_bundle,
@@ -328,7 +350,7 @@ def run_quantum_experiment(
     if backend is not None:
         metrics["hardware_diagnostics"] = extract_hardware_diagnostics(backend)
         add_gap_vs_simulator(metrics, num_qubits=num_qubits, dataset_source=dataset_source)
-    return metrics
+    return metrics, vqc
 
 
 def run_ibm_validation_experiment(
@@ -345,7 +367,7 @@ def run_ibm_validation_experiment(
     ansatz_reps: int,
     maxiter: int,
     logger,
-) -> dict:
+) -> tuple[dict, object]:
     logger("Entrenando VQC en simulador local para obtener pesos base...")
     simulator_vqc, _ = build_vqc(
         num_qubits=num_qubits,
@@ -428,7 +450,7 @@ def run_ibm_validation_experiment(
     if dataset_bundle.live_proxy_baseline_metrics is not None:
         metrics["live_proxy_baseline_metrics"] = dataset_bundle.live_proxy_baseline_metrics
     add_gap_vs_simulator(metrics, num_qubits=num_qubits, dataset_source=dataset_source)
-    return metrics
+    return metrics, simulator_vqc
 
 
 if __name__ == "__main__":

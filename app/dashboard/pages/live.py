@@ -8,9 +8,9 @@ import streamlit as st
 
 from dashboard.analytics import (
     capture_live_monitoring_batch,
+    capture_live_multivector_batch,
     inspect_live_quantum_dataset,
     make_confusion_chart,
-    predict_quantum_live_batch,
 )
 from dashboard.constants import LIVE_CAPTURE_PATH, LIVE_TRAINING_DATASET_PATH
 from dashboard.data import get_quantum_hardware_results_path, get_quantum_results_path, load_classical_live_results
@@ -18,15 +18,19 @@ from dashboard.types import ModelData
 from dashboard.ui import render_info_card, render_metric_card, section_header
 
 
-SIMULATOR_CONFIG = {
-    "label": "Simulador v2",
-    "script": "../01_attack-scrapy_v2.py",
-    "summary": "Versión avanzada con variación de tasa, ataque híbrido, tráfico de fondo y ejecución paralela.",
+SIMULATOR_CONFIGS = {
+    "Simulador v2": {
+        "label": "Simulador v2",
+        "script": "../01_attack-scrapy_v2.py",
+        "summary": "Versión avanzada con variación de tasa, ataque híbrido y tráfico de fondo.",
+    },
+    "Simulador v3 (Multivectorial)": {
+        "label": "Simulador v3 Multivectorial",
+        "script": "../01_attack-scrapy_v3.py",  
+        "summary": "Versión avanzada con múltiples vectores concurrentes y sincronización por hilos.",
+    },
 }
-
 LIVE_DEFAULT_FEATURE_MAP_REPS = 2
-LIVE_DEFAULT_ANSATZ_REPS = 2
-LIVE_DEFAULT_MAXITER = 100
 
 SIMULATOR_SCENARIOS = {
     "Sin escenario": {
@@ -76,19 +80,19 @@ LIVE_CAPTURE_PRESETS = {
         "label": "Prueba rapida",
         "duration": 2,
         "windows": 10,
-        "summary": "Sirve para validar que el flujo funciona, pero normalmente no alcanza para entrenar bien el VQC live.",
+        "summary": "Sirve para validar que el flujo funciona, pero normalmente requiere más volumen para el Quantum Kernel.",
     },
     "recomendada": {
         "label": "Dataset recomendado",
         "duration": 2,
         "windows": 40,
-        "summary": "Punto de partida razonable para empezar a separar mejor benign y attack sin hacer una captura excesivamente larga.",
+        "summary": "Punto de partida razonable para empezar a separar mejor benign y attack en entorno live.",
     },
     "robusta": {
         "label": "Dataset robusto",
         "duration": 2,
         "windows": 80,
-        "summary": "Conviene cuando queres acercarte a un dataset live mas estable y reducir la sensibilidad del VQC al split.",
+        "summary": "Conviene cuando queres acercarte a un dataset live mas estable y reducir sensibilidad.",
     },
 }
 
@@ -101,17 +105,20 @@ def _resolve_suggested_label(selected_mode: str, selected_scenario: str) -> str 
     return selected_mode
 
 
-def _load_train_quantum_simulator():
-    module = importlib.import_module("src.quantum.train_vqc_simulator")
-    module = importlib.reload(module)
-    return module.train_quantum_simulator
-
-
 def _render_live_monitoring(selected_quantum_qubits: int) -> None:
     st.markdown("#### Captura live")
     st.caption(
-        "Este bloque automatiza la captura por ventanas. No lanza ataques: solo escucha trafico, resume features y guarda el lote para el experimento cuantico live usando el simulador avanzado v2 como referencia de laboratorio."
+        "Este bloque automatiza la captura por ventanas. Permite alternar entre el simulador de laboratorio v2 y la nueva versión v3 multivectorial."
     )
+    
+    selected_sim_version_key = st.selectbox(
+        "Versión del Simulador de Laboratorio",
+        options=list(SIMULATOR_CONFIGS.keys()),
+        index=1,
+        key="live_simulator_version_selector",
+    )
+    active_sim_config = SIMULATOR_CONFIGS[selected_sim_version_key]
+
     scenario_options = list(SIMULATOR_SCENARIOS.keys())
     monitor_left, monitor_right = st.columns([1.25, 1])
     with monitor_left:
@@ -168,11 +175,11 @@ def _render_live_monitoring(selected_quantum_qubits: int) -> None:
     with monitor_right:
         render_info_card("Preset activo", preset_config["label"], preset_config["summary"])
         st.write("")
-        render_info_card("Version activa", SIMULATOR_CONFIG["label"], SIMULATOR_CONFIG["summary"])
+        render_info_card("Version activa", active_sim_config["label"], active_sim_config["summary"])
         st.write("")
         render_info_card("Archivo de salida", LIVE_CAPTURE_PATH.as_posix(), "Cada lote capturado desde el front se guarda aca.")
         st.write("")
-        render_info_card("Interfaz de red", "No es una URL", "Este campo espera una interfaz del sistema como lo, wlo1 o enp3s0. No se pone localhost:8501.")
+        render_info_card("Interfaz de red", "No es una URL", "Este campo espera una interfaz del sistema como lo, wlo1 o enp3s0.")
         st.write("")
         render_info_card(
             "Escenario tecnico",
@@ -183,7 +190,7 @@ def _render_live_monitoring(selected_quantum_qubits: int) -> None:
         render_info_card(
             "Etiqueta sugerida",
             live_label or "manual",
-            f"Script asociado: {SIMULATOR_CONFIG['script']}. Esta sugerencia sale del manual del simulador v2.",
+            f"Script asociado: {active_sim_config['script']}.",
         )
 
     if run_live_monitoring:
@@ -195,50 +202,41 @@ def _render_live_monitoring(selected_quantum_qubits: int) -> None:
             def live_logger(message: str) -> None:
                 progress_placeholder.info(message)
 
-            with st.spinner("Capturando ventanas y procesando features live..."):
-                live_batch_df = capture_live_monitoring_batch(
-                    duration=int(live_duration),
-                    windows=int(live_windows),
-                    iface=live_iface or None,
-                    count=int(live_count),
-                    label=live_monitor_label_value,
-                    scenario=live_monitor_scenario_value,
-                    simulator_version=SIMULATOR_CONFIG["label"],
-                    append_to_training=append_to_training,
-                    logger=live_logger,
-                )
+            with st.spinner(f"Capturando ventanas con {active_sim_config['label']} y procesando features..."):
+                if selected_sim_version_key == "Simulador v3 (Multivectorial)":
+                    live_batch_df = capture_live_multivector_batch(
+                        duration=int(live_duration),
+                        windows=int(live_windows),
+                        iface=live_iface or None,
+                        count=int(live_count),
+                        label=live_monitor_label_value,
+                        scenario=live_monitor_scenario_value,
+                        simulator_version=active_sim_config["label"],
+                        append_to_training=append_to_training,
+                        logger=live_logger,
+                    )
+                else:
+                    live_batch_df = capture_live_monitoring_batch(
+                        duration=int(live_duration),
+                        windows=int(live_windows),
+                        iface=live_iface or None,
+                        count=int(live_count),
+                        label=live_monitor_label_value,
+                        scenario=live_monitor_scenario_value,
+                        simulator_version=active_sim_config["label"],
+                        append_to_training=append_to_training,
+                        logger=live_logger,
+                    )
 
             monitor_result = {
                 "batch_df": live_batch_df.to_dict(orient="records"),
                 "rows": int(len(live_batch_df)),
                 "label": live_monitor_label_value,
                 "scenario": live_monitor_scenario_value,
-                "simulator_version": SIMULATOR_CONFIG["label"],
+                "simulator_version": active_sim_config["label"],
                 "saved_to_training": append_to_training,
                 "output_path": LIVE_CAPTURE_PATH.as_posix(),
             }
-
-            selected_quantum_test_size = float(st.session_state.get("selected_quantum_test_size", 0.2))
-            quantum_live_summary = inspect_live_quantum_dataset(test_size=selected_quantum_test_size)
-            if quantum_live_summary["ready"] and selected_quantum_qubits <= quantum_live_summary["max_supported_qubits"]:
-                prediction_result = predict_quantum_live_batch(
-                    live_df=live_batch_df.select_dtypes(include=[np.number]),
-                    num_qubits=selected_quantum_qubits,
-                    test_size=selected_quantum_test_size,
-                    feature_map_reps=int(st.session_state.get("selected_quantum_feature_map_reps_live", 1)),
-                    ansatz_reps=int(st.session_state.get("selected_quantum_ansatz_reps_live", 1)),
-                    maxiter=int(st.session_state.get("selected_quantum_maxiter_live", 50)),
-                    logger=live_logger,
-                )
-                monitor_result["prediction_result"] = prediction_result
-            else:
-                monitor_result["prediction_result"] = {
-                    "compatible": False,
-                    "message": (
-                        "Todavia no hay dataset live suficiente para inferencia cuantica directa desde el front. "
-                        "Captura mas ventanas benign y attack o baja los qubits."
-                    ),
-                }
 
             st.session_state["live_monitor_results"] = monitor_result
             progress_placeholder.empty()
@@ -259,46 +257,26 @@ def _render_live_monitoring(selected_quantum_qubits: int) -> None:
             )
         preview_df = pd.DataFrame(live_monitor_results["batch_df"])
         st.dataframe(preview_df, width="stretch")
-        prediction_result = live_monitor_results.get("prediction_result", {})
-        if "prediction_counts" in prediction_result:
-            pred_cols = st.columns(2)
-            with pred_cols[0]:
-                render_info_card("Ventanas benignas", str(prediction_result["prediction_counts"]["normal"]), "Resultado del VQC live para este lote.")
-            with pred_cols[1]:
-                render_info_card("Ventanas attack", str(prediction_result["prediction_counts"]["intrusion"]), "Ventanas marcadas como anomalias por el VQC live.")
-        else:
-            st.info(prediction_result.get("message", "El monitoreo live ya capturo el lote; ahora puedes usarlo para entrenar el VQC."))
 
 
 def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None:
-    train_quantum_simulator = _load_train_quantum_simulator()
-
     section_header(
         "Live",
-        "Espacio exclusivo del laboratorio cuantico con trafico capturado. Aca se construye el dataset live y se prueba el VQC sobre ese entorno experimental.",
+        "Espacio exclusivo del laboratorio cuántico con tráfico capturado. Acá se construye el dataset live y se evalúa el Quantum Kernel sobre ese entorno.",
     )
-    st.markdown("#### Que pasa en esta seccion")
+    st.markdown("#### Qué pasa en esta sección")
     explain_cols = st.columns(3)
     with explain_cols[0]:
         render_info_card("1. Capturar", "Ventanas de trafico", "El sistema escucha trafico durante varios segundos y lo resume en features agregadas.")
     with explain_cols[1]:
-        render_info_card("2. Etiquetar", "benign o attack", "Vos decidis si ese lote se agrega como trafico normal o como trafico de ataque al dataset live.")
+        render_info_card("2. Etiquetar", "benign o attack", "Vos decidis si ese lote se agrega como trafico normal o ataque al dataset live.")
     with explain_cols[2]:
-        render_info_card("3. Evaluar", "VQC live", "Con suficientes ventanas, el VQC puede entrenarse y evaluarse usando este mismo esquema de features.")
+        render_info_card("3. Evaluar", "Quantum Kernel", "Con suficientes ventanas, se computa la matriz de fidelidad y se evalúa el clasificador.")
 
     st.write("")
-    st.markdown(
-        """
-        <div class="compact-card">
-            <div class="card-label">Guia de laboratorio</div>
-            <div class="card-help">
-                Esta seccion no ejecuta el script de ataque. El generador de trafico sigue corriendo por separado en laboratorio.
-                La UI se ocupa de capturar, resumir, guardar el lote y mostrar resultados del flujo cuantico live.
-                El dashboard ahora asume solo el simulador avanzado v2 y usa sus escenarios para sugerir etiquetas mas consistentes.
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    st.info(
+        "Guía de laboratorio: esta sección no ejecuta el script de ataque directamente. El generador de tráfico corre por separado "
+        "y la UI se encarga de capturar, resumir y almacenar lotes para el entrenamiento del Quantum Kernel."
     )
     st.write("")
     _render_live_monitoring(selected_quantum_qubits)
@@ -309,10 +287,6 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
     selected_quantum_feature_map_reps = int(
         st.session_state.get("selected_quantum_feature_map_reps_live", LIVE_DEFAULT_FEATURE_MAP_REPS)
     )
-    selected_quantum_ansatz_reps = int(
-        st.session_state.get("selected_quantum_ansatz_reps_live", LIVE_DEFAULT_ANSATZ_REPS)
-    )
-    selected_quantum_maxiter = int(st.session_state.get("selected_quantum_maxiter_live", LIVE_DEFAULT_MAXITER))
     live_dataset_summary = inspect_live_quantum_dataset(test_size=selected_quantum_test_size)
     status_cols = st.columns(4)
     with status_cols[0]:
@@ -322,7 +296,7 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
     with status_cols[2]:
         render_info_card("Clases", f"{live_dataset_summary['benign_count']} benign / {live_dataset_summary['attack_count']} attack", "Balance actual del dataset live.")
     with status_cols[3]:
-        render_info_card("Qubits maximos", str(live_dataset_summary["max_supported_qubits"]), "Limite actual segun filas de entrenamiento disponibles.")
+        render_info_card("Qubits maximos", str(live_dataset_summary["max_supported_qubits"]), "Limite actual segun filas disponibles.")
 
     if live_dataset_summary["ready"]:
         st.success(live_dataset_summary["message"])
@@ -330,19 +304,9 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
         st.warning(live_dataset_summary["message"])
 
     st.write("")
-    st.markdown("#### Ejecutar VQC live")
+    st.markdown("#### Ejecutar Quantum Kernel live")
     execute_left, execute_right = st.columns([1.2, 1])
-    selected_quantum_execution_target = st.session_state.get("selected_quantum_execution_target", "simulator")
     with execute_left:
-        selected_quantum_execution_target = st.radio(
-            "Modo de ejecucion cuantica",
-            options=["simulator", "ibm_validate"],
-            index=0 if selected_quantum_execution_target == "simulator" else 1,
-            format_func=lambda value: "Simulador local" if value == "simulator" else "Entrenamiento local + validacion IBM",
-            horizontal=True,
-            key="live_quantum_execution_target_radio",
-        )
-        st.session_state["selected_quantum_execution_target"] = selected_quantum_execution_target
         selected_quantum_test_size = st.select_slider(
             "Porcion reservada para test",
             options=[0.2, 0.25, 0.33, 0.5],
@@ -351,43 +315,19 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
             key="live_quantum_test_size_slider",
         )
         st.session_state["selected_quantum_test_size"] = selected_quantum_test_size
-        with st.expander("Ajustes del circuito cuantico live", expanded=False):
+        
+        with st.expander("Ajustes del Feature Map Cuántico live", expanded=False):
             selected_quantum_feature_map_reps = st.select_slider(
                 "Repeticiones del feature map",
                 options=[1, 2, 3],
                 value=selected_quantum_feature_map_reps,
                 key="live_quantum_feature_map_reps_slider",
             )
-            selected_quantum_ansatz_reps = st.select_slider(
-                "Repeticiones del ansatz",
-                options=[1, 2, 3],
-                value=selected_quantum_ansatz_reps,
-                key="live_quantum_ansatz_reps_slider",
-            )
-            selected_quantum_maxiter = st.select_slider(
-                "Iteraciones maximas de COBYLA",
-                options=[25, 50, 75, 100, 150],
-                value=selected_quantum_maxiter,
-                key="live_quantum_maxiter_slider",
-            )
         st.session_state["selected_quantum_feature_map_reps_live"] = selected_quantum_feature_map_reps
-        st.session_state["selected_quantum_ansatz_reps_live"] = selected_quantum_ansatz_reps
-        st.session_state["selected_quantum_maxiter_live"] = selected_quantum_maxiter
-        selected_ibm_validation_samples = int(st.session_state.get("selected_ibm_validation_samples", 16))
-        if selected_quantum_execution_target == "ibm_validate":
-            selected_ibm_validation_samples = st.select_slider(
-                "Muestras del test a validar en IBM",
-                options=[4, 8, 12, 16, 24, 32],
-                value=selected_ibm_validation_samples,
-                key="live_ibm_validation_samples_slider",
-            )
-            st.session_state["selected_ibm_validation_samples"] = selected_ibm_validation_samples
-        else:
-            selected_ibm_validation_samples = int(st.session_state.get("selected_ibm_validation_samples", 16))
 
         can_run_live = live_dataset_summary["ready"] and selected_quantum_qubits <= live_dataset_summary["max_supported_qubits"]
         run_live_quantum = st.button(
-            f"Entrenar y evaluar VQC live ({selected_quantum_qubits}q)",
+            f"Entrenar y evaluar Quantum Kernel live ({selected_quantum_qubits}q)",
             width="stretch",
             type="primary",
             key="run_live_quantum_button",
@@ -401,54 +341,65 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
             )
 
     with execute_right:
-        live_results_path = (
-            get_quantum_hardware_results_path(selected_quantum_qubits, dataset_source="live")
-            if selected_quantum_execution_target == "ibm_validate"
-            else get_quantum_results_path(selected_quantum_qubits, dataset_source="live")
-        )
-        render_info_card("Corrida esperada", live_results_path.name, "Archivo que se actualiza cuando termina la prueba live.")
+        render_info_card("Modelo activo", "Quantum Kernel (QSVM)", "Clasificación basada en matrices de fidelidad cuántica.")
         st.write("")
-        render_info_card("Qubits elegidos", str(selected_quantum_qubits), "Cantidad actual de qubits para este experimento live.")
+        render_info_card("Qubits elegidos", str(selected_quantum_qubits), "Dimensión actual del espacio de Hilbert.")
         st.write("")
         render_info_card(
-            "Circuito actual",
-            f"FM x{selected_quantum_feature_map_reps} · Ansatz x{selected_quantum_ansatz_reps}",
-            f"COBYLA con maxiter={selected_quantum_maxiter}.",
+            "Configuración",
+            f"ZZFeatureMap (reps={selected_quantum_feature_map_reps})",
+            "Entrelazamiento lineal para estabilidad en entorno live.",
         )
-        st.write("")
-        render_info_card(
-            "Capacidad del dataset",
-            f"hasta {live_dataset_summary['max_supported_qubits']}q",
-            "El dataset live limita cuántos qubits pueden entrenarse según las filas de entrenamiento disponibles.",
-        )
-        st.write("")
-        render_info_card(
-            "Preset recomendado",
-            "FM x2 · Ansatz x2 · COBYLA 100",
-            "Es la mejor configuración observada hasta ahora para el flujo live v2 sin tocar el backend.",
-        )
-        if selected_quantum_execution_target == "ibm_validate":
-            st.write("")
-            render_info_card("Subset IBM", str(selected_ibm_validation_samples), "Cuántas muestras del test se envían a IBM para la validación corta.")
 
     if run_live_quantum:
         progress_placeholder = st.empty()
         try:
-            def ui_logger(message: str) -> None:
-                progress_placeholder.info(message)
+            import numpy as np
+            from sklearn.svm import SVC
+            from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score, recall_score
+            from qiskit_machine_learning.kernels import FidelityQuantumKernel
+            from qiskit.circuit.library import ZZFeatureMap
+            from src.preprocessing.quantum_preprocessing import prepare_quantum_dataset
 
-            with st.spinner("Entrenando VQC live y evaluando resultados..."):
-                quantum_results = train_quantum_simulator(
-                    num_qubits=selected_quantum_qubits,
-                    dataset_source="live",
+            with st.spinner("Procesando dataset live y calculando matriz de Kernel Cuántico..."):
+                progress_placeholder.info("Preparando datos y extrayendo features...")
+                dataset_bundle = prepare_quantum_dataset(
+                    dataset_path=LIVE_TRAINING_DATASET_PATH,
+                    benign_samples=min(250, live_dataset_summary["benign_count"]),
+                    attack_samples=min(250, live_dataset_summary["attack_count"]),
+                    qubits=selected_quantum_qubits,
                     test_size=selected_quantum_test_size,
-                    execution_target=selected_quantum_execution_target,
-                    ibm_validation_samples=selected_ibm_validation_samples,
-                    feature_map_reps=selected_quantum_feature_map_reps,
-                    ansatz_reps=selected_quantum_ansatz_reps,
-                    maxiter=selected_quantum_maxiter,
-                    logger=ui_logger,
+                    dataset_source="live"
                 )
+
+                feature_map = ZZFeatureMap(
+                    feature_dimension=selected_quantum_qubits,
+                    reps=selected_quantum_feature_map_reps,
+                    entanglement="linear"
+                )
+                quantum_kernel = FidelityQuantumKernel(feature_map=feature_map)
+
+                progress_placeholder.info("Calculando matriz de fidelidad cuántica (entrenamiento y test)...")
+                train_kernel_matrix = quantum_kernel.evaluate(x_vec=dataset_bundle.X_train)
+                test_kernel_matrix = quantum_kernel.evaluate(x_vec=dataset_bundle.X_test, y_vec=dataset_bundle.X_train)
+
+                qsvm = SVC(kernel="precomputed")
+                qsvm.fit(train_kernel_matrix, dataset_bundle.y_train)
+                y_pred = qsvm.predict(test_kernel_matrix)
+
+                metrics_dict = {
+                    "accuracy": accuracy_score(dataset_bundle.y_test, y_pred),
+                    "precision": precision_score(dataset_bundle.y_test, y_pred, zero_division=0),
+                    "recall": recall_score(dataset_bundle.y_test, y_pred, zero_division=0),
+                    "f1_score": f1_score(dataset_bundle.y_test, y_pred, zero_division=0),
+                }
+
+                quantum_results = {
+                    "metrics": metrics_dict,
+                    "confusion_matrix": confusion_matrix(dataset_bundle.y_test, y_pred).tolist(),
+                    "sample_size": dataset_bundle.sample_size,
+                    "source": "real"
+                }
 
             progress_placeholder.empty()
             st.session_state["quantum_lab_results"] = quantum_results
@@ -459,88 +410,55 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
             st.error(f"No pude ejecutar la prueba cuantica live: {error}")
 
     st.write("")
-    st.markdown("#### Resultado cuantico live actual")
-    quantum_results = model_data["Modelo cuantico"]
-    if quantum_results.get("selected_dataset_source") != "live":
-        st.info("Para ver y ejecutar el flujo live, elegi `Modelo cuantico` y `Live simulador` en la barra lateral.")
-        return
-
-    info_cols = st.columns(3)
-    with info_cols[0]:
-        render_info_card("Modo activo", "Live simulador", "Este flujo usa el dataset construido desde capturas del laboratorio.")
-    with info_cols[1]:
-        render_info_card("Qubits elegidos", str(selected_quantum_qubits), "Cantidad actual de qubits configurada para el experimento live.")
-    with info_cols[2]:
-        render_info_card("IBM validate", "Disponible", "Si queres medir hardware real, esa opcion sigue en la seccion Experimentar del VQC.")
-
+    st.markdown("#### Resultado cuántico live actual")
+    
     classical_live_results = load_classical_live_results()
     if classical_live_results is not None:
         st.write("")
-        st.markdown("#### Comparacion contra baseline live")
+        st.markdown("#### Comparacion contra baseline live clásico")
         compare_cols = st.columns(4)
         with compare_cols[0]:
-            render_metric_card("RF live Accuracy", classical_live_results["accuracy"], "Baseline clasico sobre el mismo dataset live")
+            render_metric_card("RF live Accuracy", classical_live_results["accuracy"], "Baseline clásico sobre live")
         with compare_cols[1]:
-            render_metric_card("RF live Precision", classical_live_results["precision"], "Misma fuente de datos")
+            render_metric_card("RF live Precision", classical_live_results["precision"], "Misma fuente")
         with compare_cols[2]:
-            render_metric_card("RF live Recall", classical_live_results["recall"], "Misma fuente de datos")
+            render_metric_card("RF live Recall", classical_live_results["recall"], "Misma fuente")
         with compare_cols[3]:
-            render_metric_card("RF live F1", classical_live_results["f1_score"], "Misma fuente de datos")
-        live_report = classical_live_results.get("live_curation_report") or {}
-        if live_report:
-            st.caption(
-                f"Baseline live entrenado sobre {live_report.get('curated_rows', 'n/d')} filas curadas "
-                f"(de {live_report.get('original_rows', 'n/d')} brutas)."
-            )
+            render_metric_card("RF live F1", classical_live_results["f1_score"], "Misma fuente")
 
     live_runtime_results = st.session_state.get("quantum_lab_results")
     live_runtime_qubits = st.session_state.get("quantum_lab_results_qubits")
     live_runtime_source = st.session_state.get("quantum_lab_results_source")
+    
     display_results = (
         live_runtime_results
         if live_runtime_results and live_runtime_qubits == selected_quantum_qubits and live_runtime_source == "live"
-        else quantum_results
+        else None
     )
 
-    if display_results.get("source") == "real" or "metrics" in display_results:
+    if display_results and ("metrics" in display_results or "accuracy" in display_results):
         metrics_payload = display_results["metrics"] if "metrics" in display_results else display_results
         confusion_payload = display_results["confusion_matrix"]
         metric_cols = st.columns(4)
         with metric_cols[0]:
-            render_metric_card("Accuracy", metrics_payload["accuracy"], "Resultado del VQC live")
+            render_metric_card("Accuracy", metrics_payload["accuracy"], "Resultado Quantum Kernel live")
         with metric_cols[1]:
-            render_metric_card("Precision", metrics_payload["precision"], "Resultado del VQC live")
+            render_metric_card("Precision", metrics_payload["precision"], "Resultado Quantum Kernel live")
         with metric_cols[2]:
-            render_metric_card("Recall", metrics_payload["recall"], "Resultado del VQC live")
+            render_metric_card("Recall", metrics_payload["recall"], "Resultado Quantum Kernel live")
         with metric_cols[3]:
-            render_metric_card("F1-Score", metrics_payload["f1_score"], "Resultado del VQC live")
+            render_metric_card("F1-Score", metrics_payload["f1_score"], "Resultado Quantum Kernel live")
         st.write("")
         st.plotly_chart(
             make_confusion_chart(np.array(confusion_payload), height=300),
             width="stretch",
             key=f"live_confusion_chart_{selected_quantum_qubits}q",
         )
-        if "live_curation_report" in display_results:
-            report = display_results["live_curation_report"]
-            st.caption(
-                f"Entrenamiento live curado: {report.get('curated_rows', 'n/d')} filas utiles sobre "
-                f"{report.get('original_rows', 'n/d')} capturas brutas."
-            )
-        if "live_proxy_baseline_metrics" in display_results:
-            proxy = display_results["live_proxy_baseline_metrics"]
-            st.caption(
-                f"Proxy clasico previo al VQC sobre el split actual: "
-                f"Acc {proxy.get('accuracy', 0):.2%} | F1 {proxy.get('f1_score', 0):.2%}."
-            )
     else:
-        command = f"python -m src.quantum.train_vqc_simulator --dataset-source live --qubits {selected_quantum_qubits} --test-size {selected_quantum_test_size}"
-        if selected_quantum_qubits > live_dataset_summary["max_supported_qubits"]:
-            st.warning(
-                f"El dataset live actual solo soporta hasta {live_dataset_summary['max_supported_qubits']} qubits con test {int(selected_quantum_test_size * 100)}%. "
-                f"Agregá más ventanas o bajá el número de qubits."
+        if live_dataset_summary["ready"]:
+            st.info(
+                f"Todavía no hay una corrida de Quantum Kernel live ejecutada para {selected_quantum_qubits} qubits en esta sesión. "
+                "Podés dispararla con el botón de arriba."
             )
         else:
-            st.info(
-                f"Todavia no hay una corrida VQC live guardada para {selected_quantum_qubits} qubits. "
-                f"Podés ejecutarla desde este frente con el boton de arriba o por terminal con: {command}"
-            )
+            st.warning("Completá los requisitos del dataset live para habilitar el entrenamiento y evaluación.")

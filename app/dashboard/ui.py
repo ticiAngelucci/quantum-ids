@@ -7,69 +7,65 @@ from dashboard.types import ModelData, QuantumDatasetSource, SectionName, Sideba
 
 
 def section_header(title: str, description: str) -> None:
-    st.markdown(f"### {title}")
-    st.markdown(f"<p class='section-intro'>{description}</p>", unsafe_allow_html=True)
+    st.subheader(title)
+    st.caption(description)
+
+
+def render_spotlight_panel(eyebrow: str, title: str, body: str, meta: list[tuple[str, str]] | None = None) -> None:
+    with st.container(border=True):
+        st.caption(eyebrow)
+        st.markdown(f"#### {title}")
+        st.write(body)
+        if meta:
+            meta_cols = st.columns(len(meta))
+            for col, (label, value) in zip(meta_cols, meta):
+                with col:
+                    st.caption(label)
+                    st.markdown(f"**{value}**")
+
+
+def render_story_card(step: str, title: str, body: str) -> None:
+    with st.container(border=True):
+        st.caption(step)
+        st.markdown(f"**{title}**")
+        st.write(body)
 
 
 def render_info_card(label: str, value: str, help_text: str) -> None:
-    st.markdown(
-        f"""
-        <div class="info-card">
-            <div class="card-label">{label}</div>
-            <div class="card-value">{value}</div>
-            <div class="card-help">{help_text}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    with st.container(border=True):
+        st.caption(label)
+        st.markdown(f"**{value}**")
+        st.write(help_text)
 
 
 def render_metric_card(label: str, value: float, caption: str) -> None:
-    formatted_value = f"{value * 100:.2f}%"
-    st.markdown(
-        f"""
-        <div class="metric-card">
-            <div class="card-label">{label}</div>
-            <div class="metric-value">{formatted_value}</div>
-            <div class="metric-caption">{caption} · valor crudo: {value:.4f}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.metric(label, f"{value * 100:.2f}%")
+    st.caption(f"{caption} · valor crudo: {value:.4f}")
 
 
 def render_header(model_data: ModelData) -> None:
-    _ = model_data
-    st.markdown(
-        """
-        <section class="hero">
-            <h1>Quantum IDS Dashboard</h1>
-            <div class="badge-row">
-                <span class="badge accent">Tesis</span>
-                <span class="badge">IDS</span>
-                <span class="badge">QML</span>
-                <span class="badge">NISQ</span>
-            </div>
-        </section>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        """
-        <div class="compact-card">
-            <div class="card-label">Como leer este panel</div>
-            <div class="card-help">
-                <strong>Accuracy</strong> es el porcentaje total de aciertos.
-                <strong> Precision</strong> dice que tan confiables son las alertas.
-                <strong> Recall</strong> muestra cuantos ataques reales detecta el sistema.
-                <strong> F1-Score</strong> resume el equilibrio entre precision y recall.
-                <strong> Live simulador</strong> usa trafico capturado en laboratorio.
-                <strong> IBM validate</strong> entrena local y valida una porcion chica en hardware real.
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    selected_model = st.session_state.get("selected_model", "Modelo clasico")
+    selected_qubits = st.session_state.get("selected_quantum_qubits", 4)
+    selected_dataset_source = st.session_state.get("selected_quantum_dataset_source", "cicids")
+    selected_platform = st.session_state.get("selected_quantum_execution_target", "simulator")
+    model = model_data[selected_model]
+    dataset_label = "Live simulador" if selected_dataset_source == "live" else "CICIDS2017"
+    platform_label = "IBM validate" if selected_platform == "ibm_validate" else "Simulador local"
+    status_label = model["source_label"]
+
+    left, right = st.columns([1.6, 1])
+    with left:
+        st.caption("Quantum Machine Learning aplicado a deteccion de anomalias en red")
+        st.title("Quantum IDS Dashboard")
+        st.caption("Consola tecnica para seguimiento de baseline clasico, VQC en simulacion y validacion sobre hardware real.")
+    with right:
+        st.caption(
+            f"Dataset · {dataset_label}\n\n"
+            f"Modelo · {model['short_label']}\n\n"
+            f"Qubits · {selected_qubits}\n\n"
+            f"Plataforma · {platform_label}\n\n"
+            f"Estado · {status_label}"
+        )
 
 
 def _reset_quantum_lab_state() -> None:
@@ -95,14 +91,11 @@ def render_sidebar_controls(
         config_container = st.container()
         section_container = st.container()
         st.markdown("## Quantum IDS")
-        st.caption(
-            "Esta app compara dos caminos para detectar trafico anomalo en red: uno clasico y otro cuantico. "
-            "La idea es mostrar resultados, limites y valor experimental de cada enfoque en un lenguaje claro."
-        )
+        st.caption("Consola de experimentacion QML para ciberseguridad.")
 
         with config_container:
             st.markdown("---")
-            st.markdown("### Configuracion")
+            st.markdown("### Experimento")
             available_models = [model_name for model_name in ENABLED_MODEL_OPTIONS if model_name in model_data]
             default_model = st.session_state.get("selected_model", "Modelo clasico")
             if default_model not in available_models:
@@ -147,6 +140,18 @@ def render_sidebar_controls(
                 selected_quantum_qubits = chosen_qubits
                 st.session_state["selected_quantum_qubits"] = chosen_qubits
 
+            active_dataset = "Live simulador" if selected_quantum_dataset_source == "live" else "CICIDS2017"
+            active_platform = st.session_state.get("selected_quantum_execution_target", "simulator")
+            active_platform_label = "IBM validate" if active_platform == "ibm_validate" else "Simulador local"
+            model = model_data[selected_model]
+            st.caption("Estado tecnico")
+            st.write(
+                f"Dataset: **{active_dataset}**\n\n"
+                f"Plataforma: **{active_platform_label}**\n\n"
+                f"Qubits: **{selected_quantum_qubits if selected_model == 'Modelo cuantico' else '-'}**\n\n"
+                f"Estado: **{model['source_label']}**"
+            )
+
         section_options = (
             all_section_options
             if selected_model == "Modelo cuantico"
@@ -158,7 +163,7 @@ def render_sidebar_controls(
 
         with section_container:
             st.markdown("---")
-            st.markdown("### Seccion")
+            st.markdown("### Navegacion")
             current_step = st.radio(
                 "Seccion",
                 options=section_options,
@@ -170,35 +175,23 @@ def render_sidebar_controls(
             )
             st.session_state["current_step"] = current_step
 
-        model = model_data[selected_model]
-        source_class = "real" if model["source"] == "real" else "mock"
         st.markdown("---")
-        st.markdown(
-            f"""
-            <div class="sidebar-card">
-                <div class="sidebar-title">{model["short_label"]}</div>
-                <div class="sidebar-copy">
-                    <span class="status-pill {source_class}">{model["source_label"]}</span>
-                    {model["description"]}
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
+        model = model_data[selected_model]
+        st.caption("Proyecto")
+        st.write(
+            "Dataset: **ok**\n\n"
+            "Baseline: **ok**\n\n"
+            "VQC: **ok**\n\n"
+            "Live: **parcial**\n\n"
+            "SpinQ: **pendiente**\n\n"
+            "Braket: **futuro**"
         )
-        st.markdown(
-            """
-            <div class="sidebar-card">
-                <div class="sidebar-title">Glosario rapido</div>
-                <div class="sidebar-copy">
-                    Accuracy: aciertos totales.<br>
-                    Precision: confianza de una alerta.<br>
-                    Recall: ataques reales detectados.<br>
-                    Live: trafico del laboratorio.<br>
-                    IBM validate: local + validacion corta en IBM.
-                </div>
-                </div>
-            """,
-            unsafe_allow_html=True,
+        st.markdown("---")
+        st.caption("Lectura rapida")
+        st.write(
+            f"Modelo: **{model['short_label']}**\n\n"
+            f"Metrica actual: **{model['accuracy']:.1%} acc**\n\n"
+            f"Referencia: **{model['description']}**"
         )
 
     return SidebarSelection(

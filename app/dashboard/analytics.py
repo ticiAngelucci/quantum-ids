@@ -13,6 +13,7 @@ from sklearn.model_selection import train_test_split
 
 from dashboard.constants import (
     ACCENT_YELLOW,
+    BACKGROUND,
     CLASSICAL_MODEL_PATH,
     DATASET_PATH,
     LIVE_CAPTURE_PATH,
@@ -112,8 +113,8 @@ def make_global_comparison_chart(model_data: ModelData, height: int = 320) -> go
         height=height,
         yaxis_tickformat=".0%",
         yaxis_range=[0, 1.05],
-        plot_bgcolor="white",
-        paper_bgcolor="white",
+        plot_bgcolor=BACKGROUND,
+        paper_bgcolor=BACKGROUND,
         legend_title_text="",
         margin=dict(l=12, r=12, t=14, b=10),
         font=dict(color=TEXT),
@@ -128,7 +129,7 @@ def make_confusion_chart(matrix: np.ndarray, height: int = 320) -> go.Figure:
             z=matrix,
             x=["Predicho benigno", "Predicho intrusion"],
             y=["Real benigno", "Real intrusion"],
-            colorscale=[[0, "#EEF4FB"], [0.55, SECONDARY_BLUE], [1, PRIMARY_BLUE]],
+            colorscale=[[0, "#0B1833"], [0.52, SECONDARY_BLUE], [1, ACCENT_YELLOW]],
             text=matrix,
             texttemplate="%{text}",
             hovertemplate="%{y}<br>%{x}: %{z}<extra></extra>",
@@ -137,8 +138,8 @@ def make_confusion_chart(matrix: np.ndarray, height: int = 320) -> go.Figure:
     )
     fig.update_layout(
         height=height,
-        plot_bgcolor="white",
-        paper_bgcolor="white",
+        plot_bgcolor=BACKGROUND,
+        paper_bgcolor=BACKGROUND,
         margin=dict(l=12, r=12, t=14, b=10),
         font=dict(color=TEXT),
     )
@@ -163,8 +164,8 @@ def make_time_chart(model_data: ModelData, height: int = 320) -> go.Figure:
     fig.update_layout(
         height=height,
         showlegend=False,
-        plot_bgcolor="white",
-        paper_bgcolor="white",
+        plot_bgcolor=BACKGROUND,
+        paper_bgcolor=BACKGROUND,
         margin=dict(l=12, r=12, t=14, b=10),
         font=dict(color=TEXT),
     )
@@ -192,8 +193,8 @@ def make_noise_chart(model_data: ModelData, height: int = 320) -> go.Figure:
         height=height,
         yaxis_tickformat=".0%",
         yaxis_range=[0.78, 0.95],
-        plot_bgcolor="white",
-        paper_bgcolor="white",
+        plot_bgcolor=BACKGROUND,
+        paper_bgcolor=BACKGROUND,
         legend_title_text="",
         margin=dict(l=12, r=12, t=14, b=10),
         font=dict(color=TEXT),
@@ -342,7 +343,52 @@ def capture_live_monitoring_batch(
             save_features(output_features, LIVE_TRAINING_DATASET_PATH, append=True)
 
     return pd.DataFrame(batch_rows)
+def capture_live_multivector_batch(
+    *,
+    duration: int,
+    windows: int,
+    iface: str | None = None,
+    count: int = 0,
+    output_path: Path = LIVE_CAPTURE_PATH,
+    label: str | None = None,
+    scenario: str | None = None,
+    simulator_version: str | None = None,
+    append_to_training: bool = False,
+    logger=lambda _message: None,
+) -> pd.DataFrame:
+    from src.live_detection.capture import capture_packets, save_features
+    from src.live_detection.feature_extractor import extract_live_features
 
+    if duration <= 0 or windows <= 0:
+        raise ValueError("La duracion y la cantidad de ventanas deben ser mayores a 0.")
+
+    batch_rows: list[dict[str, float | str]] = []
+    if output_path.exists():
+        output_path.unlink()
+
+    for window_index in range(windows):
+        logger(f"[v3 Multivectorial] Capturando ventana {window_index + 1} de {windows}...")
+        
+        packets, elapsed = capture_packets(duration=duration, iface=iface, count=count)
+        features = extract_live_features(packets=packets, duration_seconds=elapsed)
+        
+        if label is not None:
+            features["Label"] = label
+            
+        output_features = dict(features)
+        
+        if scenario is not None:
+            output_features["Scenario"] = scenario
+        if simulator_version is not None:
+            output_features["SimulatorVersion"] = simulator_version
+            
+        batch_rows.append(output_features)
+        save_features(output_features, output_path, append=window_index > 0)
+        
+        if append_to_training and label is not None:
+            save_features(output_features, LIVE_TRAINING_DATASET_PATH, append=True)
+
+    return pd.DataFrame(batch_rows)
 
 def predict_quantum_live_batch(
     *,
@@ -354,48 +400,46 @@ def predict_quantum_live_batch(
     maxiter: int = 50,
     logger=lambda _message: None,
 ) -> dict:
+    import joblib
+    import numpy as np
+    from qiskit_machine_learning.algorithms import VQC
     from src.preprocessing.quantum_preprocessing import prepare_quantum_dataset
-    from src.quantum.train_vqc_simulator import build_vqc
+    from src.quantum.config import RESULTS_DIR
 
     if not LIVE_TRAINING_DATASET_PATH.exists():
-        raise FileNotFoundError(
-            f"No existe {LIVE_TRAINING_DATASET_PATH.as_posix()}. Genera capturas benign y attack antes de inferir en vivo."
-        )
+        raise FileNotFoundError("Genera capturas benign y attack primero.")
 
-    dataset_bundle = prepare_quantum_dataset(
-        dataset_path=LIVE_TRAINING_DATASET_PATH,
-        pca_components=num_qubits,
-        test_size=test_size,
-        dataset_source="live",
-    )
+    # 1. Obtener la estructura de features del entrenamiento
     training_df = pd.read_csv(LIVE_TRAINING_DATASET_PATH)
     training_df.columns = [str(col).strip() for col in training_df.columns]
     label_column = find_label_column(training_df)
-    expected_features_df = enrich_live_feature_frame(
-        training_df.drop(columns=[label_column]).select_dtypes(include=[np.number])
-    )
-    expected_features = expected_features_df.columns.tolist()
-    transformed_live_df = enrich_live_feature_frame(live_df.select_dtypes(include=[np.number]))
-    comparison = compare_feature_sets(transformed_live_df.columns.tolist(), expected_features)
-    if not comparison["compatible"]:
-        raise ValueError(
-            "Las features capturadas no coinciden con el dataset live de entrenamiento. "
-            f"Faltantes: {comparison['missing']} | Extras: {comparison['extra']}"
-        )
+    X_train_cols = training_df.drop(columns=[label_column]).select_dtypes(include=[np.number]).columns.tolist()
 
-    logger("Entrenando VQC live en simulador para inferencia inmediata...")
-    vqc, _ = build_vqc(
-        num_qubits=num_qubits,
-        execution_target="simulator",
-        feature_map_reps=feature_map_reps,
-        ansatz_reps=ansatz_reps,
-        maxiter=maxiter,
-        logger=logger,
-    )
-    vqc.fit(dataset_bundle.X_train, dataset_bundle.y_train)
-    batch_scaled = dataset_bundle.scaler.transform(transformed_live_df[expected_features])
-    batch_pca = dataset_bundle.pca.transform(batch_scaled)
-    predictions = np.asarray(vqc.predict(batch_pca)).astype(int)
+    # 2. Cargar artefactos (necesitamos el selector para saber qué espera)
+    selector = joblib.load(RESULTS_DIR / "quantum_selector.joblib")
+    scaler = joblib.load(RESULTS_DIR / "quantum_scaler.joblib")
+    vqc = VQC.load(str(RESULTS_DIR / "vqc_model.model"))
+
+    # 3. Preparación de features live
+    transformed_live_df = enrich_live_feature_frame(live_df.select_dtypes(include=[np.number]))
+    
+    # --- ALINEACIÓN CIEGA (A PRUEBA DE ERRORES) ---
+    # Creamos una matriz de ceros con las dimensiones exactas que el selector espera
+    expected_count = selector.n_features_in_
+    final_input = np.zeros((transformed_live_df.shape[0], expected_count))
+    
+    # Rellenamos solo las columnas que coinciden por nombre
+    for i, col in enumerate(X_train_cols):
+        if col in transformed_live_df.columns:
+            final_input[:, i] = transformed_live_df[col].values
+            
+    # 4. Inferencia cuántica
+    # Aplicamos transformaciones sobre el array NumPy (sin nombres de columnas)
+    batch_selected = selector.transform(final_input)
+    batch_quantum = scaler.transform(batch_selected)
+    
+    predictions = np.asarray(vqc.predict(batch_quantum)).astype(int)
+    
     return {
         "prediction_counts": {
             "normal": int((predictions == 0).sum()),
@@ -403,7 +447,6 @@ def predict_quantum_live_batch(
         },
         "predictions": predictions.tolist(),
     }
-
 
 def inspect_live_quantum_dataset(
     dataset_path: Path = LIVE_TRAINING_DATASET_PATH,

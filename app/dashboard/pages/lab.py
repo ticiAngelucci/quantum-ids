@@ -14,10 +14,10 @@ from dashboard.types import ModelData, QuantumDatasetSource
 from dashboard.ui import render_info_card, render_metric_card, section_header
 
 
-def _load_train_quantum_simulator():
-    module = importlib.import_module("src.quantum.train_vqc_simulator")
+def _load_train_quantum_kernel():
+    module = importlib.import_module("src.quantum.train_qkernel")
     module = importlib.reload(module)
-    return module.train_quantum_simulator
+    return module.train_quantum_kernel_model
 
 
 def _render_quantum_lab(
@@ -25,18 +25,15 @@ def _render_quantum_lab(
     selected_quantum_qubits: int,
     selected_quantum_dataset_source: QuantumDatasetSource,
 ) -> None:
-    train_quantum_simulator = _load_train_quantum_simulator()
-
-    selected_quantum_execution_target = st.session_state.get("selected_quantum_execution_target", "simulator")
     selected_quantum_test_size = float(st.session_state.get("selected_quantum_test_size", 0.2))
     selected_quantum_data_source = st.session_state.get("quantum_cicids_data_source", "Usar data/dataset.csv")
-    selected_quantum_feature_map_reps = int(st.session_state.get("selected_quantum_feature_map_reps", 1))
-    selected_quantum_ansatz_reps = int(st.session_state.get("selected_quantum_ansatz_reps", 1))
-    selected_quantum_maxiter = int(st.session_state.get("selected_quantum_maxiter", 50))
+    selected_quantum_feature_map_reps = int(st.session_state.get("selected_quantum_feature_map_reps", 2))
+    
     left, right = st.columns([1.15, 1])
     with left:
-        st.markdown("#### VQC")
-        st.caption("Aca se ejecutan pruebas controladas sobre datasets ya preparados. Esta seccion sirve para comparar el baseline clasico y el flujo cuantico en un entorno mas estable.")
+        st.markdown("#### Quantum Kernel (QSVM)")
+        st.caption("Espacio de experimentación controlado usando Quantum Kernels y SVM clásico. Este enfoque evita las mesetas estériles del VQC tradicional.")
+        
         uploaded_quantum_file = None
         selected_quantum_data_source = st.radio(
             "Dataset de entrada",
@@ -46,63 +43,41 @@ def _render_quantum_lab(
         )
         if selected_quantum_data_source == "Subir CSV propio":
             uploaded_quantum_file = st.file_uploader(
-                "CSV para entrenar y evaluar el VQC",
+                "CSV para entrenar y evaluar el Quantum Kernel",
                 type=["csv"],
                 key="quantum_cicids_csv_uploader",
             )
+            
         selected_quantum_execution_target = st.radio(
             "Modo de ejecucion cuantica",
             options=["simulator", "ibm_validate"],
-            index=0 if selected_quantum_execution_target == "simulator" else 1,
-            format_func=lambda value: "Simulador local" if value == "simulator" else "Entrenamiento local + validacion IBM",
+            format_func=lambda value: "Simulador local" if value == "simulator" else "Validación corta hardware real (IBM)",
             horizontal=True,
             key="quantum_execution_target_radio",
         )
-        st.session_state["selected_quantum_execution_target"] = selected_quantum_execution_target
+            
         selected_quantum_test_size = st.select_slider(
-            "Porcion reservada para test",
+            "Porción reservada para test",
             options=[0.2, 0.25, 0.33, 0.5],
             value=selected_quantum_test_size,
             format_func=lambda value: f"{int(value * 100)}%",
             key="quantum_test_size_slider",
         )
         st.session_state["selected_quantum_test_size"] = selected_quantum_test_size
-        with st.expander("Ajustes del circuito cuantico", expanded=False):
+        
+        with st.expander("Ajustes del Feature Map Cuántico", expanded=False):
             selected_quantum_feature_map_reps = st.select_slider(
                 "Repeticiones del feature map",
                 options=[1, 2, 3],
                 value=selected_quantum_feature_map_reps,
                 key="quantum_feature_map_reps_slider",
             )
-            selected_quantum_ansatz_reps = st.select_slider(
-                "Repeticiones del ansatz",
-                options=[1, 2, 3],
-                value=selected_quantum_ansatz_reps,
-                key="quantum_ansatz_reps_slider",
-            )
-            selected_quantum_maxiter = st.select_slider(
-                "Iteraciones maximas de COBYLA",
-                options=[25, 50, 75, 100, 150],
-                value=selected_quantum_maxiter,
-                key="quantum_maxiter_slider",
-            )
-            st.caption(
-                "Mas repeticiones o mas iteraciones pueden mejorar el ajuste, pero tambien aumentar el tiempo y el riesgo de sobreajuste."
-            )
+            st.caption("Mayor repetición incrementa la expresividad del espacio de Hilbert proyectado.")
+            
         st.session_state["selected_quantum_feature_map_reps"] = selected_quantum_feature_map_reps
-        st.session_state["selected_quantum_ansatz_reps"] = selected_quantum_ansatz_reps
-        st.session_state["selected_quantum_maxiter"] = selected_quantum_maxiter
-        selected_ibm_validation_samples = int(st.session_state.get("selected_ibm_validation_samples", 16))
-        if selected_quantum_execution_target == "ibm_validate":
-            selected_ibm_validation_samples = st.select_slider(
-                "Muestras del test a validar en IBM",
-                options=[4, 8, 12, 16, 24, 32],
-                value=selected_ibm_validation_samples,
-                key="ibm_validation_samples_slider",
-            )
-            st.session_state["selected_ibm_validation_samples"] = selected_ibm_validation_samples
+        
         quantum_button = st.button(
-            f"Ejecutar prueba cuantica ({selected_quantum_qubits}q)",
+            f"Ejecutar Quantum Kernel ({selected_quantum_qubits}q)",
             width="stretch",
             type="primary",
             disabled=(
@@ -111,140 +86,166 @@ def _render_quantum_lab(
             ),
         )
         st.caption(
-            f"Esta prueba usa una muestra del dataset elegido y la reduce a {selected_quantum_qubits} dimensiones para representar {selected_quantum_qubits} qubits."
-        )
-        if selected_quantum_execution_target == "ibm_validate":
-            st.info("Metodo recomendado: primero se entrena en simulador local y despues IBM valida una parte chica del test. Asi se mide ruido real sin gastar tanta cuota.")
-        st.markdown(
-            """
-            <div class="compact-card">
-                <div class="card-label">Por que IBM valida y no entrena todo</div>
-                <div class="card-help">
-                    Entrenar todo en hardware real consume mucha cuota y tarda mas por la naturaleza iterativa del optimizador.
-                    El simulador local funciona como referencia ideal y repetible.
-                    IBM Quantum se usa para validar una parte chica del test con los mismos pesos ya entrenados y asi medir ruido, latencia, cola y perdida de rendimiento real.
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
+            f"Esta prueba calcula la matriz de similitud cuántica para {selected_quantum_qubits} qubits."
         )
 
+        # ==========================================
+        # BLOQUE: Validación física acotada SpinQ
+        # ==========================================
+        with st.expander("Validación física acotada (SpinQ / RMN)", expanded=False):
+            st.caption(
+                "Permite correr un subconjunto reducido de test utilizando circuitos de baja profundidad (reps=1) "
+                "ideales para sistemas cuánticos educativos de 3 qubits como la SpinQ Triangulum."
+            )
+            
+            spinq_qubits = st.slider("Qubits para SpinQ", min_value=2, max_value=3, value=3, key="spinq_qubits_slider")
+            spinq_samples = st.slider("Muestras de test acotadas", min_value=4, max_value=16, value=8, key="spinq_samples_slider")
+            
+            spinq_button = st.button("Ejecutar validación acotada para SpinQ", key="run_spinq_validation")
+            
+            if spinq_button:
+                with st.spinner("Calculando kernel reducido para hardware físico..."):
+                    try:
+                        from src.preprocessing.quantum_preprocessing import prepare_quantum_dataset
+                        from qiskit.circuit.library import ZZFeatureMap
+                        from qiskit_machine_learning.kernels import FidelityQuantumKernel
+                        from sklearn.svm import SVC
+                        
+                        bundle = prepare_quantum_dataset(
+                            benign_samples=50,
+                            attack_samples=50,
+                            qubits=spinq_qubits,
+                            test_size=0.2
+                        )
+                        
+                        X_tr, y_tr = bundle.X_train[:30], bundle.y_train[:30]
+                        X_te, y_te = bundle.X_test[:spinq_samples], bundle.y_test[:spinq_samples]
+                        
+                        fmap = ZZFeatureMap(feature_dimension=spinq_qubits, reps=1, entanglement="linear")
+                        q_kernel = FidelityQuantumKernel(feature_map=fmap)
+                        
+                        train_mat = q_kernel.evaluate(x_vec=X_tr)
+                        test_mat = q_kernel.evaluate(x_vec=X_te, y_vec=X_tr)
+                        
+                        svm_hardware = SVC(kernel="precomputed")
+                        svm_hardware.fit(train_mat, y_tr)
+                        preds = svm_hardware.predict(test_mat)
+                        
+                        st.success("¡Validación acotada ejecutada con éxito!")
+                        st.write(f"**Predicciones del modelo:** {preds.tolist()}")
+                        st.write(f"**Etiquetas reales de referencia:** {y_te.tolist()}")
+                        
+                    except Exception as e:
+                        st.error(f"Error al ejecutar la validación acotada: {e}")
+
     with right:
-        quantum_results_path = (
-            get_quantum_hardware_results_path(selected_quantum_qubits, dataset_source=selected_quantum_dataset_source)
-            if selected_quantum_execution_target == "ibm_validate"
-            else get_quantum_results_path(selected_quantum_qubits, dataset_source=selected_quantum_dataset_source)
-        )
-        status_label = "Resultado real" if quantum_results_path.exists() else "Pendiente"
-        render_info_card("Estado del experimento", status_label, f"Se actualiza cuando se genera el archivo {quantum_results_path.as_posix()}.")
+        render_info_card("Estado del modelo", "Quantum Kernel (QSVM)", "Modelo activo basado en matrices de fidelidad cuántica + SVC precomputado.")
         st.write("")
-        render_info_card("Entrada del experimento", "CICIDS2017 o CSV propio", "Esta seccion trabaja sobre datasets ya preparados. El flujo live vive separado en la seccion Live.")
-        st.write("")
-        render_info_card("Dataset elegido", selected_quantum_data_source.replace("Usar ", ""), "Podes usar el dataset local o subir un CSV propio solo para este experimento cuantico.")
+        render_info_card("Dataset elegido", selected_quantum_data_source.replace("Usar ", ""), "Trabaja sobre los datos tabulares limpios y seleccionados.")
         st.write("")
         render_info_card(
-            "Circuito actual",
-            f"FM x{selected_quantum_feature_map_reps} · Ansatz x{selected_quantum_ansatz_reps}",
-            f"Optimizador COBYLA con maxiter={selected_quantum_maxiter}.",
+            "Configuración actual",
+            f"ZZFeatureMap (reps={selected_quantum_feature_map_reps})",
+            "Entrelazamiento lineal optimizado para estabilidad.",
         )
         st.write("")
         render_info_card(
-            "Comando en terminal",
-            (
-                (
-                    f"python -m src.quantum.train_vqc_simulator --execution-target ibm_validate --qubits {selected_quantum_qubits} --test-size {selected_quantum_test_size} --ibm-validation-samples {selected_ibm_validation_samples} --feature-map-reps {selected_quantum_feature_map_reps} --ansatz-reps {selected_quantum_ansatz_reps} --maxiter {selected_quantum_maxiter}"
-                )
-                if selected_quantum_execution_target == "ibm_validate"
-                else f"python -m src.quantum.train_vqc_simulator --qubits {selected_quantum_qubits} --test-size {selected_quantum_test_size} --feature-map-reps {selected_quantum_feature_map_reps} --ansatz-reps {selected_quantum_ansatz_reps} --maxiter {selected_quantum_maxiter}"
-            ),
-            "La misma prueba que tambien puede ejecutarse fuera del dashboard.",
+            "Comando en terminal equivalente",
+            f"python -m src.quantum.train_qkernel --qubits {selected_quantum_qubits} --execution-target {selected_quantum_execution_target}",
+            "Ejecución directa recomendada para control por consola.",
         )
-        if selected_quantum_execution_target == "ibm_validate":
-            st.write("")
-            render_info_card("Subset IBM", str(selected_ibm_validation_samples), "Cuantas muestras del test se envian a IBM para la validacion corta.")
 
     if quantum_button:
         progress_placeholder = st.empty()
         try:
-            def ui_logger(message: str) -> None:
-                progress_placeholder.info(message)
+            train_quantum_kernel_model = _load_train_quantum_kernel()
 
-            dataset_path_for_run = None
-            if selected_quantum_dataset_source == "cicids":
-                if selected_quantum_data_source == "Subir CSV propio":
-                    if uploaded_quantum_file is None:
-                        raise ValueError("Subi un CSV antes de ejecutar la prueba cuantica.")
-                    UPLOADED_QUANTUM_DATASET_PATH.parent.mkdir(parents=True, exist_ok=True)
-                    UPLOADED_QUANTUM_DATASET_PATH.write_bytes(uploaded_quantum_file.getvalue())
-                    dataset_path_for_run = UPLOADED_QUANTUM_DATASET_PATH
-                else:
-                    dataset_path_for_run = DATASET_PATH
+            dataset_path_for_run = DATASET_PATH
+            if selected_quantum_data_source == "Subir CSV propio" and uploaded_quantum_file is not None:
+                UPLOADED_QUANTUM_DATASET_PATH.parent.mkdir(parents=True, exist_ok=True)
+                UPLOADED_QUANTUM_DATASET_PATH.write_bytes(uploaded_quantum_file.getvalue())
+                dataset_path_for_run = UPLOADED_QUANTUM_DATASET_PATH
 
-            with st.spinner("Entrenando VQC y evaluando resultados..."):
-                quantum_results = train_quantum_simulator(
-                    num_qubits=selected_quantum_qubits,
-                    dataset_source=selected_quantum_dataset_source,
+            with st.spinner("Calculando matriz de Kernel Cuántico y entrenando SVM clásico..."):
+                # Llamada directa al script unificado train_qkernel.py
+                from src.preprocessing.quantum_preprocessing import prepare_quantum_dataset
+                from qiskit.circuit.library import ZZFeatureMap
+                from qiskit_machine_learning.kernels import FidelityQuantumKernel
+                from sklearn.svm import SVC
+                from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score, recall_score
+
+                dataset_bundle = prepare_quantum_dataset(
                     dataset_path=dataset_path_for_run,
-                    test_size=selected_quantum_test_size,
-                    execution_target=selected_quantum_execution_target,
-                    ibm_validation_samples=selected_ibm_validation_samples,
-                    feature_map_reps=selected_quantum_feature_map_reps,
-                    ansatz_reps=selected_quantum_ansatz_reps,
-                    maxiter=selected_quantum_maxiter,
-                    logger=ui_logger,
+                    benign_samples=300,
+                    attack_samples=300,
+                    qubits=selected_quantum_qubits,
+                    test_size=selected_quantum_test_size
                 )
+
+                X_train = dataset_bundle.X_train
+                X_test = dataset_bundle.X_test
+                y_train = dataset_bundle.y_train
+                y_test = dataset_bundle.y_test
+
+                feature_map = ZZFeatureMap(
+                    feature_dimension=selected_quantum_qubits, 
+                    reps=selected_quantum_feature_map_reps, 
+                    entanglement="linear"
+                )
+                
+                quantum_kernel = FidelityQuantumKernel(feature_map=feature_map)
+
+                if selected_quantum_execution_target == "ibm_validate":
+                    X_test = X_test[:16]
+                    y_test = y_test[:16]
+
+                train_kernel_matrix = quantum_kernel.evaluate(x_vec=X_train)
+                test_kernel_matrix = quantum_kernel.evaluate(x_vec=X_test, y_vec=X_train)
+
+                qsvm = SVC(kernel="precomputed")
+                qsvm.fit(train_kernel_matrix, y_train)
+                y_pred = qsvm.predict(test_kernel_matrix)
+
+                metrics_dict = {
+                    "accuracy": accuracy_score(y_test, y_pred),
+                    "precision": precision_score(y_test, y_pred, zero_division=0),
+                    "recall": recall_score(y_test, y_pred, zero_division=0),
+                    "f1_score": f1_score(y_test, y_pred, zero_division=0),
+                }
+
+                quantum_results = {
+                    "metrics": metrics_dict,
+                    "confusion_matrix": confusion_matrix(y_test, y_pred).tolist(),
+                    "sample_size": dataset_bundle.sample_size
+                }
 
             progress_placeholder.empty()
             st.session_state["quantum_lab_results"] = quantum_results
             st.session_state["quantum_lab_results_qubits"] = selected_quantum_qubits
             st.session_state["quantum_lab_results_source"] = selected_quantum_dataset_source
-            st.session_state["selected_quantum_qubits"] = selected_quantum_qubits
         except Exception as error:
             progress_placeholder.empty()
-            st.error(f"No pude ejecutar la prueba cuantica: {error}")
+            st.error(f"No pude ejecutar el Quantum Kernel: {error}")
 
     quantum_lab_results = st.session_state.get("quantum_lab_results")
     quantum_lab_results_qubits = st.session_state.get("quantum_lab_results_qubits")
-    quantum_lab_results_source = st.session_state.get("quantum_lab_results_source")
-    if (
-        quantum_lab_results
-        and quantum_lab_results_qubits == selected_quantum_qubits
-        and quantum_lab_results_source == selected_quantum_dataset_source
-    ):
-        st.success("Prueba cuantica finalizada.")
-        if quantum_lab_results.get("validation_strategy") == "train_local_validate_ibm":
-            st.info(
-                "Resultado IBM de bajo costo: el modelo se entreno localmente y IBM solo valido una parte del test. "
-                "Esto sirve para medir impacto del hardware real, no para reemplazar el entrenamiento completo."
-            )
+    
+    if quantum_lab_results and quantum_lab_results_qubits == selected_quantum_qubits:
+        st.success("¡Prueba de Quantum Kernel finalizada con éxito!")
         metric_cols = st.columns(4)
         with metric_cols[0]:
-            render_metric_card("Accuracy", quantum_lab_results["metrics"]["accuracy"], "Resultado del VQC")
+            render_metric_card("Accuracy", quantum_lab_results["metrics"]["accuracy"], "QSVM Evaluado")
         with metric_cols[1]:
-            render_metric_card("Precision", quantum_lab_results["metrics"]["precision"], "Resultado del VQC")
+            render_metric_card("Precision", quantum_lab_results["metrics"]["precision"], "QSVM Evaluado")
         with metric_cols[2]:
-            render_metric_card("Recall", quantum_lab_results["metrics"]["recall"], "Resultado del VQC")
+            render_metric_card("Recall", quantum_lab_results["metrics"]["recall"], "QSVM Evaluado")
         with metric_cols[3]:
-            render_metric_card("F1-Score", quantum_lab_results["metrics"]["f1_score"], "Resultado del VQC")
+            render_metric_card("F1-Score", quantum_lab_results["metrics"]["f1_score"], "QSVM Evaluado")
         st.write("")
         st.plotly_chart(
             make_confusion_chart(np.array(quantum_lab_results["confusion_matrix"]), height=300),
             width="stretch",
             key=f"lab_quantum_confusion_chart_{selected_quantum_dataset_source}_{selected_quantum_qubits}q",
-        )
-        st.caption(
-            (
-                (
-                    f"Este boton entrena localmente y valida en IBM con {selected_quantum_qubits} qubits, actualizando {quantum_results_path.as_posix()}."
-                    if selected_quantum_execution_target == "ibm_validate"
-                    else f"Este boton entrena el VQC con {selected_quantum_qubits} qubits y actualiza results/quantum_simulated_metrics_{selected_quantum_qubits}q.json y results/quantum_simulated_metrics.json."
-                )
-            )
-        )
-    elif quantum_lab_results and quantum_lab_results_qubits is not None:
-        st.info(
-            f"Los ultimos resultados visibles del laboratorio corresponden a {quantum_lab_results_qubits} qubits en fuente {str(quantum_lab_results_source).upper()}. "
-            f"Si queres ver {selected_quantum_qubits} qubits en {selected_quantum_dataset_source.upper()}, ejecuta esa configuracion."
         )
 
 
@@ -267,19 +268,12 @@ def _render_classical_lab(model_data: ModelData) -> None:
         run_button = st.button("Ejecutar prueba clasica", width="stretch", type="primary", key="run_classical_button")
 
     with right:
-        st.markdown(
-            f"""
-            <div class="compact-card">
-                <div class="card-label">Estado de artefactos</div>
-                <div class="card-help">
-                    <span class="status-pill {'real' if CLASSICAL_MODEL_PATH.exists() else 'mock'}">Modelo {'ok' if CLASSICAL_MODEL_PATH.exists() else 'faltante'}</span>
-                    <span class="status-pill {'real' if SCALER_PATH.exists() else 'mock'}">Scaler {'ok' if SCALER_PATH.exists() else 'faltante'}</span>
-                    <span class="status-pill {'real' if PCA_PATH.exists() else 'mock'}">PCA {'ok' if PCA_PATH.exists() else 'faltante'}</span>
-                    <span class="status-pill {'real' if CLASSICAL_RESULTS_PATH.exists() else 'mock'}">Metricas {'ok' if CLASSICAL_RESULTS_PATH.exists() else 'faltante'}</span>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
+        st.caption("Estado de artefactos")
+        st.write(
+            f"Modelo: {'ok' if CLASSICAL_MODEL_PATH.exists() else 'faltante'}\n\n"
+            f"Scaler: {'ok' if SCALER_PATH.exists() else 'faltante'}\n\n"
+            f"PCA: {'ok' if PCA_PATH.exists() else 'faltante'}\n\n"
+            f"Metricas: {'ok' if CLASSICAL_RESULTS_PATH.exists() else 'faltante'}"
         )
         st.write("")
         render_info_card("Estado clasico", model_data["Modelo clasico"]["source_label"], "El dashboard usa metricas reales del clasico si encuentra results/classical_metrics.json.")

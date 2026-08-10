@@ -116,13 +116,14 @@ def load_packets_from_pcap(pcap_path: Path):
 def save_features(features: dict[str, float], output_path: Path, append: bool = False) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     new_row_df = pd.DataFrame([features])
-    if append and output_path.exists():
-        existing_df = pd.read_csv(output_path)
-        existing_df.columns = [str(column).strip() for column in existing_df.columns]
-        combined_df = pd.concat([existing_df, new_row_df], ignore_index=True, sort=False)
-        combined_df.to_csv(output_path, index=False)
+    
+    if append:
+        # mode='a' es "append". Si el archivo no existe, escribe los encabezados. Si existe, no los repite.
+        new_row_df.to_csv(output_path, mode='a', header=not output_path.exists(), index=False)
     else:
-        new_row_df.to_csv(output_path, index=False)
+        # mode='w' es "write" (sobrescribe todo desde cero)
+        new_row_df.to_csv(output_path, mode='w', header=True, index=False)
+        
     LOGGER.info("Features guardadas en %s", output_path)
 
 

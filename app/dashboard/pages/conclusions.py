@@ -20,17 +20,9 @@ def render_conclusion_tab(model_data: ModelData, selected_model: str) -> None:
         render_info_card("Hardware real", "Validacion fisica", "Permite mostrar que pasa cuando el modelo sale del simulador ideal.")
 
     st.write("")
-    st.markdown(
-        """
-        <div class="compact-card">
-            <div class="card-label">Lectura preliminar</div>
-            <div class="card-help">
-                El modelo clasico ofrece hoy la referencia mas solida para deteccion de anomalias en este entorno.
-                El valor de QML aparece como linea experimental para medir potencial, limites y costo del enfoque cuantico.
-                El hardware real se usa para validar que ocurre fuera del simulador ideal y entender mejor las restricciones actuales.
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    st.write(
+        "Lectura preliminar: el modelo clasico ofrece hoy la referencia mas solida para deteccion de anomalias en este entorno. "
+        "El valor de QML aparece como linea experimental para medir potencial, limites y costo del enfoque cuantico. "
+        "El hardware real se usa para validar que ocurre fuera del simulador ideal y entender mejor las restricciones actuales."
     )
     st.caption(f"Enfoque activo al momento de lectura: {model_data[selected_model]['short_label']}.")

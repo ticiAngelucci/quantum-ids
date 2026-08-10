@@ -18,16 +18,8 @@ def render_demo_panel(selected_model: str) -> None:
     with col2:
         if run_demo:
             label, risk_score = classify_mock_connection(packet_rate, failed_logins, protocol_risk, selected_model)
-            card_class = "attack" if label == "Intrusion detectada" else "normal"
-            st.markdown(
-                f"""
-                <div class="result-card {card_class}">
-                    <div class="result-title">{label}</div>
-                    <div class="card-help">Score de riesgo estimado: {risk_score:.1%}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+            st.subheader(label)
+            st.metric("Score de riesgo estimado", f"{risk_score:.1%}")
         else:
             render_info_card("Estado", "Esperando simulacion", "Mové los controles y ejecutá la demo para ver una lectura rapida.")
 

@@ -18,7 +18,7 @@ def import_quantum_dependencies():
         algorithm_globals = None
 
     try:
-        from qiskit.circuit.library import zz_feature_map, real_amplitudes
+        from qiskit.circuit.library import zz_feature_map, z_feature_map, pauli_feature_map, real_amplitudes
     except ImportError as error:
         raise ImportError("No se pudo importar qiskit. Verifica que `qiskit` este instalado.") from error
 
@@ -130,19 +130,28 @@ def select_ibm_backend(service, num_qubits: int, backend_name: str | None = None
 
 
 def build_vqc(
-    num_qubits: int,
+   num_qubits: int,
     execution_target: str = "simulator",
     ibm_backend_name: str | None = None,
     ibm_shots: int = DEFAULT_IBM_SHOTS,
     feature_map_reps: int = DEFAULT_FEATURE_MAP_REPS,
     ansatz_reps: int = DEFAULT_ANSATZ_REPS,
     maxiter: int = COBYLA_MAXITER,
+    feature_map_type: str = "zz",
     logger=print,
 ):
     zz_feature_map, real_amplitudes, StatevectorSampler, VQC, COBYLA = import_quantum_dependencies()
 
     logger("Construyendo feature map y ansatz...")
-    feature_map = zz_feature_map(feature_dimension=num_qubits, reps=feature_map_reps)
+    if feature_map_type == "z":
+        # Más simple, sin entrelazamiento cruzado (evita barren plateaus)
+        feature_map = z_feature_map(feature_dimension=num_qubits, reps=feature_map_reps)
+    elif feature_map_type == "pauli":
+        # Permite probar bases de Pauli con entrelazamiento lineal
+        feature_map = pauli_feature_map(feature_dimension=num_qubits, reps=feature_map_reps, entanglement="linear")
+    else:
+        # El ZZFeatureMap clásico por defecto, pero probando entrelazamiento lineal en lugar de full
+        feature_map = zz_feature_map(feature_dimension=num_qubits, reps=feature_map_reps, entanglement="linear")
     ansatz = real_amplitudes(num_qubits=num_qubits, reps=ansatz_reps)
     optimizer = COBYLA(maxiter=maxiter)
     pass_manager = None

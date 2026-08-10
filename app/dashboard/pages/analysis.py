@@ -10,15 +10,27 @@ from dashboard.analytics import (
     make_time_chart,
 )
 from dashboard.types import ModelData
-from dashboard.ui import render_info_card, section_header
+from dashboard.ui import render_info_card, render_spotlight_panel, section_header
 
 
 def render_analysis_tab(model_data: ModelData, selected_model: str, selected_quantum_dataset_source: str) -> None:
     section_header(
-        "Comparacion y analisis",
-        "Lectura guiada de rendimiento, ruido, tiempos y diferencias entre los enfoques.",
+        "Analisis",
+        "Lectura comparativa de rendimiento, ruido, tiempos y estabilidad experimental.",
     )
-    st.markdown("#### Resumen general")
+    quantum_source_label = model_data["Modelo cuantico"].get("dataset_source_label", "CICIDS2017")
+    render_spotlight_panel(
+        "Lectura comparativa",
+        "Como conviene leer estos resultados",
+        "Primero compará la brecha entre clasico y cuantico. Despues mirá si esa diferencia cambia cuando variás qubits, cuando pasás a live o cuando aparece hardware real. Esa secuencia ayuda a separar si el cuello está en el dataset, en el circuito o en el ruido del backend.",
+        meta=[
+            ("Enfoque activo", model_data[selected_model]["short_label"]),
+            ("Corrida cuantica", quantum_source_label),
+            ("Qubits", str(model_data["Modelo cuantico"]["selected_qubits"])),
+        ],
+    )
+
+    st.markdown("#### Rendimiento comparado")
     if model_data["Modelo cuantico"]["source"] != "real":
         command = (
             f"python -m src.quantum.train_vqc_simulator --dataset-source live --qubits {model_data['Modelo cuantico']['selected_qubits']}"
@@ -29,46 +41,62 @@ def render_analysis_tab(model_data: ModelData, selected_model: str, selected_qua
             f"Todavia no se entreno el VQC {'live' if selected_quantum_dataset_source == 'live' else 'CICIDS'} "
             f"con {model_data['Modelo cuantico']['selected_qubits']} qubits. Ejecutar: {command}"
         )
-    st.plotly_chart(make_global_comparison_chart(model_data, height=380), width="stretch", key="analysis_global_comparison_chart")
+
     table_df = build_metrics_dataframe(model_data).pivot(index="Modelo", columns="Metrica", values="Valor")
     table_df = table_df[["Accuracy", "Precision", "Recall", "F1-Score"]]
-    st.dataframe(table_df.style.format("{:.1%}"), width="stretch")
-    st.caption(
-        f"El clasico muestra su referencia real. El bloque cuantico refleja la corrida "
-        f"{model_data['Modelo cuantico'].get('dataset_source_label', 'CICIDS2017')} "
-        f"de {model_data['Modelo cuantico']['selected_qubits']} qubits si existe un resultado guardado."
-    )
+    summary_left, summary_right = st.columns([1.25, 1])
+    with summary_left:
+        st.plotly_chart(make_global_comparison_chart(model_data, height=380), width="stretch", key="analysis_global_comparison_chart")
+    with summary_right:
+        st.dataframe(table_df.style.format("{:.1%}"), width="stretch")
+        st.caption(
+            f"El clasico muestra su referencia real. El bloque cuantico refleja la corrida "
+            f"{quantum_source_label} de {model_data['Modelo cuantico']['selected_qubits']} qubits si existe un resultado guardado."
+        )
 
     st.write("")
     st.markdown("#### Corridas VQC disponibles")
     quantum_runs_df = build_quantum_runs_dataframe(dataset_source=selected_quantum_dataset_source)
-    st.dataframe(
-        quantum_runs_df.style.format(
-            {
-                "Accuracy": "{:.2%}",
-                "Precision": "{:.2%}",
-                "Recall": "{:.2%}",
-                "F1-Score": "{:.2%}",
-                "Tiempo (s)": "{:.2f}",
-                "Sample": "{:.0f}",
-            },
-            na_rep="Sin correr",
-        ),
-        width="stretch",
-    )
     trained_runs = quantum_runs_df[quantum_runs_df["Estado"] == "Entrenado"]
-    if not trained_runs.empty:
-        best_row = trained_runs.sort_values(["F1-Score", "Accuracy"], ascending=False).iloc[0]
-        st.caption(
-            f"Mejor corrida VQC disponible en {best_row['Fuente']}: {int(best_row['Qubits'])} qubits "
-            f"con F1-score {best_row['F1-Score']:.2%} y tiempo {best_row['Tiempo (s)']:.2f}s."
+    runs_left, runs_right = st.columns([1.2, 0.9])
+    with runs_left:
+        st.dataframe(
+            quantum_runs_df.style.format(
+                {
+                    "Accuracy": "{:.2%}",
+                    "Precision": "{:.2%}",
+                    "Recall": "{:.2%}",
+                    "F1-Score": "{:.2%}",
+                    "Tiempo (s)": "{:.2f}",
+                    "Sample": "{:.0f}",
+                },
+                na_rep="Sin correr",
+            ),
+            width="stretch",
         )
-    else:
-        st.info("Todavia no hay corridas VQC disponibles para comparar.")
+    with runs_right:
+        if not trained_runs.empty:
+            best_row = trained_runs.sort_values(["F1-Score", "Accuracy"], ascending=False).iloc[0]
+            render_spotlight_panel(
+                "Mejor corrida guardada",
+                f"{int(best_row['Qubits'])} qubits · {best_row['Fuente']}",
+                "Esta es la referencia cuantica mas fuerte disponible en disco para la fuente elegida. Conviene leerla junto con el costo temporal y no solo por accuracy.",
+                meta=[
+                    ("F1", f"{best_row['F1-Score']:.2%}"),
+                    ("Accuracy", f"{best_row['Accuracy']:.2%}"),
+                    ("Tiempo", f"{best_row['Tiempo (s)']:.2f}s"),
+                ],
+            )
+        else:
+            render_spotlight_panel(
+                "Corridas pendientes",
+                "Todavia no hay evidencia cuantica suficiente",
+                "No hay corridas VQC guardadas para esta fuente. Antes de comparar qubits conviene ejecutar al menos una corrida base y una variante para ver si la brecha es estable.",
+            )
 
     st.write("")
     st.markdown("#### Ruido y limites del hardware")
-    col1, col2 = st.columns([1.4, 1])
+    col1, col2 = st.columns([1.35, 1])
     with col1:
         st.plotly_chart(make_noise_chart(model_data, height=350), width="stretch", key="analysis_noise_chart")
     with col2:
@@ -102,5 +130,17 @@ def render_analysis_tab(model_data: ModelData, selected_model: str, selected_qua
 
     st.write("")
     st.markdown("#### Costos de tiempo")
-    st.plotly_chart(make_time_chart(model_data, height=350), width="stretch", key="analysis_time_chart")
-    st.caption("El clasico sigue siendo el mas eficiente; el hardware real conserva el mayor costo temporal.")
+    time_left, time_right = st.columns([1.2, 0.9])
+    with time_left:
+        st.plotly_chart(make_time_chart(model_data, height=350), width="stretch", key="analysis_time_chart")
+    with time_right:
+        render_spotlight_panel(
+            "Costo computacional",
+            "Tiempo vs valor experimental",
+            "El clasico sigue siendo el mas eficiente. El simulador cuantico introduce costo por optimizacion iterativa y el hardware real agrega cola, calibracion y latencia. Por eso la lectura correcta es rendimiento por contexto, no solo velocidad bruta.",
+            meta=[
+                ("Clasico", f"{model_data['Modelo clasico']['execution_time']:.1f}s"),
+                ("QML", f"{model_data['Modelo cuantico']['execution_time']:.1f}s"),
+                ("Hardware", f"{model_data['Hardware cuantico real']['execution_time']:.1f}s"),
+            ],
+        )

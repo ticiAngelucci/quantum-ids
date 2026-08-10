@@ -40,14 +40,14 @@ def extract_live_features(packets: Iterable[Packet], duration_seconds: float) ->
         try:
             packet_size = len(packet)
             packet_sizes.append(packet_size)
-        except Exception:
+        except TypeError:
             continue
 
         packet_time = getattr(packet, "time", None)
         if packet_time is not None:
             try:
                 packet_timestamps.append(float(packet_time))
-            except Exception:
+            except (ValueError, TypeError):
                 pass
 
         if IP in packet:
@@ -56,7 +56,7 @@ def extract_live_features(packets: Iterable[Packet], duration_seconds: float) ->
             src_ip_counts[src_ip] = src_ip_counts.get(src_ip, 0) + 1
             try:
                 ttl_values.append(int(packet[IP].ttl))
-            except Exception:
+            except (AttributeError, ValueError, TypeError):
                 pass
 
         if TCP in packet:
@@ -115,7 +115,7 @@ def extract_live_features(packets: Iterable[Packet], duration_seconds: float) ->
             payload_size = len(bytes(packet.payload))
             if payload_size > 0:
                 packets_with_payload += 1
-        except Exception:
+        except (TypeError, AttributeError):
             pass
 
     avg_packet_size = sum(packet_sizes) / total_packets if total_packets else 0.0
