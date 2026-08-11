@@ -21,12 +21,12 @@ from dashboard.ui import render_info_card, render_metric_card, section_header
 SIMULATOR_CONFIGS = {
     "Simulador v2": {
         "label": "Simulador v2",
-        "script": "../01_attack-scrapy_v2.py",
+        "script": "scripts/01_attack-scrapy_v2.py",
         "summary": "Versión avanzada con variación de tasa, ataque híbrido y tráfico de fondo.",
     },
     "Simulador v3 (Multivectorial)": {
         "label": "Simulador v3 Multivectorial",
-        "script": "../01_attack-scrapy_v3.py",  
+        "script": "scripts/01_attack-scrapy_v3.py",  
         "summary": "Versión avanzada con múltiples vectores concurrentes y sincronización por hilos.",
     },
 }
