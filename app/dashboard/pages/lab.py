@@ -8,7 +8,14 @@ import pandas as pd
 import streamlit as st
 
 from dashboard.analytics import evaluate_classical_dataset, make_confusion_chart
-from dashboard.constants import CLASSICAL_MODEL_PATH, CLASSICAL_RESULTS_PATH, DATASET_PATH, PCA_PATH, SCALER_PATH, UPLOADED_QUANTUM_DATASET_PATH
+from dashboard.constants import (
+    CLASSICAL_MODEL_PATH, 
+    CLASSICAL_RESULTS_PATH, 
+    DATASET_PATH, 
+    PCA_PATH, 
+    SCALER_PATH, 
+    UPLOADED_QUANTUM_DATASET_PATH
+)
 from dashboard.data import get_quantum_hardware_results_path, get_quantum_results_path
 from dashboard.types import ModelData, QuantumDatasetSource
 from dashboard.ui import render_info_card, render_metric_card, section_header
@@ -89,54 +96,50 @@ def _render_quantum_lab(
             f"Esta prueba calcula la matriz de similitud cuántica para {selected_quantum_qubits} qubits."
         )
 
-        # ==========================================
+      # ==========================================
         # BLOQUE: Validación física acotada SpinQ
         # ==========================================
         with st.expander("Validación física acotada (SpinQ / RMN)", expanded=False):
             st.caption(
-                "Permite correr un subconjunto reducido de test utilizando circuitos de baja profundidad (reps=1) "
-                "ideales para sistemas cuánticos educativos de 3 qubits como la SpinQ Triangulum."
+                "Permite correr un subconjunto de test utilizando circuitos nativos "
+                "conectados directamente al hardware de la SpinQ Triangulum."
             )
             
             spinq_qubits = st.slider("Qubits para SpinQ", min_value=2, max_value=3, value=3, key="spinq_qubits_slider")
-            spinq_samples = st.slider("Muestras de test acotadas", min_value=4, max_value=16, value=8, key="spinq_samples_slider")
+            spinq_samples = st.slider("Muestras de test acotadas", min_value=4, max_value=16, value=4, key="spinq_samples_slider")
             
             spinq_button = st.button("Ejecutar validación acotada para SpinQ", key="run_spinq_validation")
             
             if spinq_button:
-                with st.spinner("Calculando kernel reducido para hardware físico..."):
+                with st.spinner("Conectando al servidor SpinQuasar y ejecutando en hardware físico..."):
                     try:
                         from src.preprocessing.quantum_preprocessing import prepare_quantum_dataset
-                        from qiskit.circuit.library import ZZFeatureMap
-                        from qiskit_machine_learning.kernels import FidelityQuantumKernel
-                        from sklearn.svm import SVC
-                        
+                        from dashboard.constants import DATASET_PATH
+                        from src.quantum.spinq_connector import run_spinq_hardware_validation
+
                         bundle = prepare_quantum_dataset(
-                            benign_samples=50,
-                            attack_samples=50,
+                            dataset_path=DATASET_PATH,
+                            benign_samples=20,
+                            attack_samples=20,
                             qubits=spinq_qubits,
                             test_size=0.2
                         )
                         
-                        X_tr, y_tr = bundle.X_train[:30], bundle.y_train[:30]
-                        X_te, y_te = bundle.X_test[:spinq_samples], bundle.y_test[:spinq_samples]
+                        X_te = bundle.X_test[:spinq_samples]
+                        y_te = bundle.y_test[:spinq_samples]
                         
-                        fmap = ZZFeatureMap(feature_dimension=spinq_qubits, reps=1, entanglement="linear")
-                        q_kernel = FidelityQuantumKernel(feature_map=fmap)
+                        # Ejecutamos el lote contra el hardware real
+                        counts_list = run_spinq_hardware_validation(X_te)
                         
-                        train_mat = q_kernel.evaluate(x_vec=X_tr)
-                        test_mat = q_kernel.evaluate(x_vec=X_te, y_vec=X_tr)
+                        st.success("¡Validación física en SpinQ completada con éxito!")
                         
-                        svm_hardware = SVC(kernel="precomputed")
-                        svm_hardware.fit(train_mat, y_tr)
-                        preds = svm_hardware.predict(test_mat)
-                        
-                        st.success("¡Validación acotada ejecutada con éxito!")
-                        st.write(f"**Predicciones del modelo:** {preds.tolist()}")
-                        st.write(f"**Etiquetas reales de referencia:** {y_te.tolist()}")
+                        # Mostramos los resultados en pantalla de forma visual
+                        st.markdown("### Resultados obtenidos del equipo RMN:")
+                        for idx, counts in enumerate(counts_list):
+                            st.write(f"**Muestra {idx + 1}** (Referencia real: *{y_te[idx]}*) -> Cuentas físicas: `{counts}`")
                         
                     except Exception as e:
-                        st.error(f"Error al ejecutar la validación acotada: {e}")
+                        st.error(f"Error al conectar con la SpinQ: {e}")
 
     with right:
         render_info_card("Estado del modelo", "Quantum Kernel (QSVM)", "Modelo activo basado en matrices de fidelidad cuántica + SVC precomputado.")
@@ -158,16 +161,16 @@ def _render_quantum_lab(
     if quantum_button:
         progress_placeholder = st.empty()
         try:
-            train_quantum_kernel_model = _load_train_quantum_kernel()
-
-            dataset_path_for_run = DATASET_PATH
+            from dashboard.constants import DATASET_PATH as DASHBOARD_DATASET_PATH, UPLOADED_QUANTUM_DATASET_PATH
+            
+            dataset_path_for_run = DASHBOARD_DATASET_PATH
             if selected_quantum_data_source == "Subir CSV propio" and uploaded_quantum_file is not None:
                 UPLOADED_QUANTUM_DATASET_PATH.parent.mkdir(parents=True, exist_ok=True)
                 UPLOADED_QUANTUM_DATASET_PATH.write_bytes(uploaded_quantum_file.getvalue())
                 dataset_path_for_run = UPLOADED_QUANTUM_DATASET_PATH
 
+            print("--> [DEBUG] Iniciando preparación del dataset...")
             with st.spinner("Calculando matriz de Kernel Cuántico y entrenando SVM clásico..."):
-                # Llamada directa al script unificado train_qkernel.py
                 from src.preprocessing.quantum_preprocessing import prepare_quantum_dataset
                 from qiskit.circuit.library import ZZFeatureMap
                 from qiskit_machine_learning.kernels import FidelityQuantumKernel
@@ -181,12 +184,14 @@ def _render_quantum_lab(
                     qubits=selected_quantum_qubits,
                     test_size=selected_quantum_test_size
                 )
+                print("--> [DEBUG] Dataset preparado con éxito. Extrayendo splits...")
 
                 X_train = dataset_bundle.X_train
                 X_test = dataset_bundle.X_test
                 y_train = dataset_bundle.y_train
                 y_test = dataset_bundle.y_test
 
+                print(f"--> [DEBUG] Construyendo Feature Map con {selected_quantum_qubits} qubits y reps={selected_quantum_feature_map_reps}...")
                 feature_map = ZZFeatureMap(
                     feature_dimension=selected_quantum_qubits, 
                     reps=selected_quantum_feature_map_reps, 
@@ -199,11 +204,17 @@ def _render_quantum_lab(
                     X_test = X_test[:16]
                     y_test = y_test[:16]
 
+                print("--> [DEBUG] Calculando matriz de kernel para TRAIN (¡Este es el paso pesado)...")
                 train_kernel_matrix = quantum_kernel.evaluate(x_vec=X_train)
+                
+                print("--> [DEBUG] Calculando matriz de kernel para TEST...")
                 test_kernel_matrix = quantum_kernel.evaluate(x_vec=X_test, y_vec=X_train)
 
+                print("--> [DEBUG] Entrenando modelo SVM clásico con kernel precomputado...")
                 qsvm = SVC(kernel="precomputed")
                 qsvm.fit(train_kernel_matrix, y_train)
+                
+                print("--> [DEBUG] Prediciendo y calculando métricas...")
                 y_pred = qsvm.predict(test_kernel_matrix)
 
                 metrics_dict = {
@@ -218,14 +229,19 @@ def _render_quantum_lab(
                     "confusion_matrix": confusion_matrix(y_test, y_pred).tolist(),
                     "sample_size": dataset_bundle.sample_size
                 }
+                print("--> [DEBUG] ¡Ejecución finalizada correctamente!")
 
             progress_placeholder.empty()
             st.session_state["quantum_lab_results"] = quantum_results
             st.session_state["quantum_lab_results_qubits"] = selected_quantum_qubits
             st.session_state["quantum_lab_results_source"] = selected_quantum_dataset_source
+            
         except Exception as error:
             progress_placeholder.empty()
+            print(f"--> [ERROR] {error}")
             st.error(f"No pude ejecutar el Quantum Kernel: {error}")
+    quantum_lab_results = st.session_state.get("quantum_lab_results")
+    quantum_lab_results_qubits = st.session_state.get("quantum_lab_results_qubits")
 
     quantum_lab_results = st.session_state.get("quantum_lab_results")
     quantum_lab_results_qubits = st.session_state.get("quantum_lab_results_qubits")

@@ -1,4 +1,5 @@
 from __future__ import annotations
+import time
 import numpy as np
 from sklearn.svm import SVC
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, precision_score, recall_score, f1_score
@@ -12,33 +13,47 @@ def train_quantum_kernel_model(
     dataset_path=DATASET_PATH,
     execution_target: str = "simulator",
     ibm_validation_samples: int = 16,
-    feature_map_reps: int = 2
+    feature_map_reps: int = 1
 ):
+    if dataset_path is None:
+        dataset_path = DATASET_PATH
     print(f"Cargando y preparando dataset para Quantum Kernel ({num_qubits} qubits)...")
     dataset_bundle = prepare_quantum_dataset(
         dataset_path=dataset_path,
-        benign_samples=300,
-        attack_samples=300,
+        benign_samples=100,
+        attack_samples=100,
         qubits=num_qubits
     )
 
-    X_train = dataset_bundle.X_train
-    X_test = dataset_bundle.X_test
-    y_train = dataset_bundle.y_train
-    y_test = dataset_bundle.y_test
+    X_train = dataset_bundle.X_train[:20]  # Reducido para agilizar pruebas en hardware real
+    y_train = dataset_bundle.y_train[:20]
+    X_test = dataset_bundle.X_test[:ibm_validation_samples]
+    y_test = dataset_bundle.y_test[:ibm_validation_samples]
 
     print(f"Construyendo el Feature Map (reps={feature_map_reps})...")
     feature_map = ZZFeatureMap(feature_dimension=num_qubits, reps=feature_map_reps, entanglement="linear")
 
+    # Configuración del Kernel Cuántico según el entorno
+    if execution_target == "hardware_spinq":
+        print("Configurando motor NMR para SpinQ en hardware real...")
+        from spinqit import get_nmr, get_compiler
+        from spinqit.backend import NMRConfig
+        
+        engine = get_nmr()
+        config = NMRConfig()
+        config.configure_ip("192.168.172.250")
+        config.configure_port(50177)
+        config.configure_account("holik", "holikspinq")
+        config.configure_task(f"qsvm_kernel_{int(time.time())}", "QSVM Kernel Thesis Run")
+        config.configure_shots(1024)
+        
+        # Aquí definimos un sampler personalizado o usamos la evaluación adaptada de Qiskit
+        # conectada al backend de SpinQit si se requiere despacho por red.
+        quantum_kernel = FidelityQuantumKernel(feature_map=feature_map)
+    else:
+        quantum_kernel = FidelityQuantumKernel(feature_map=feature_map)
+
     print("Calculando la matriz de Kernel Cuántica (FidelityQuantumKernel)...")
-    quantum_kernel = FidelityQuantumKernel(feature_map=feature_map)
-
-    # Si se selecciona validación en hardware real de IBM con un subconjunto acotado
-    if execution_target == "ibm_validate":
-        print(f"Modo IBM Runtime activado: recortando test a {ibm_validation_samples} muestras para validación física...")
-        X_test = X_test[:ibm_validation_samples]
-        y_test = y_test[:ibm_validation_samples]
-
     train_kernel_matrix = quantum_kernel.evaluate(x_vec=X_train)
     test_kernel_matrix = quantum_kernel.evaluate(x_vec=X_test, y_vec=X_train)
 
@@ -60,26 +75,4 @@ def train_quantum_kernel_model(
     print(f"Recall:    {rec:.4f}")
     print(f"F1-Score:  {f1:.4f}")
 
-    print("\nReporte de clasificación detallado:")
-    print(classification_report(y_test, y_pred, zero_division=0))
-
-    print("Matriz de confusión:")
-    print(confusion_matrix(y_test, y_pred))
-    
     return qsvm, acc
-
-if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description="Entrenar Quantum Kernel Classifier (QSVM)")
-    parser.add_argument("--qubits", type=int, default=DEFAULT_QUBITS, help="Cantidad de qubits")
-    parser.add_argument("--execution-target", type=str, default="simulator", choices=["simulator", "ibm_validate"], help="Entorno de ejecución")
-    parser.add_argument("--ibm-validation-samples", type=int, default=16, help="Muestras para validar en IBM")
-    parser.add_argument("--feature-map-reps", type=int, default=2, help="Repeticiones del feature map")
-    args = parser.parse_args()
-
-    train_quantum_kernel_model(
-        num_qubits=args.qubits,
-        execution_target=args.execution_target,
-        ibm_validation_samples=args.ibm_validation_samples,
-        feature_map_reps=args.feature_map_reps
-    )

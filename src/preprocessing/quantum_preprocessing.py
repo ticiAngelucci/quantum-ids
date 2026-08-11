@@ -77,9 +77,10 @@ def prepare_quantum_dataset(
     random_state: int = 42,
     dataset_source: str | None = None,
 ) -> QuantumDatasetBundle:
-    
+    df = pd.read_csv(dataset_path)
     # 0. Carga y Muestreo
     df = load_and_clean_dataset(dataset_path)
+    df = df.loc[:, df.apply(pd.Series.nunique) != 1]
     label_column = find_label_column(df)
     
     sampled_df = sample_balanced_binary_dataset(
