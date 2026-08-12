@@ -96,7 +96,7 @@ def _render_quantum_lab(
             f"Esta prueba calcula la matriz de similitud cuántica para {selected_quantum_qubits} qubits."
         )
 
-      # ==========================================
+    # ==========================================
         # BLOQUE: Validación física acotada SpinQ
         # ==========================================
         with st.expander("Validación física acotada (SpinQ / RMN)", expanded=False):
@@ -115,7 +115,10 @@ def _render_quantum_lab(
                     try:
                         from src.preprocessing.quantum_preprocessing import prepare_quantum_dataset
                         from dashboard.constants import DATASET_PATH
-                        from src.quantum.spinq_connector import run_spinq_hardware_validation
+                        import time
+                        from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+                        from spinqit import get_compiler, Circuit, H
+                        from src.quantum.spinq_connector import connect_to_spinq
 
                         bundle = prepare_quantum_dataset(
                             dataset_path=DATASET_PATH,
@@ -128,19 +131,94 @@ def _render_quantum_lab(
                         X_te = bundle.X_test[:spinq_samples]
                         y_te = bundle.y_test[:spinq_samples]
                         
-                        # Ejecutamos el lote contra el hardware real
-                        counts_list = run_spinq_hardware_validation(X_te)
+                        engine, config = connect_to_spinq(task_name=f"spinq_eval_{int(time.time())}")
+                        if not engine or not config:
+                            raise RuntimeError("No se pudo establecer la conexión con el servidor SpinQ.")
                         
+                        # Función interna de decodificación de conteos físicos
+                        def _decode_counts(counts: dict) -> int:
+                            if not counts or "error" in counts or "warning" in counts:
+                                return 0
+                            dominant_state = max(counts, key=counts.get)
+                            if dominant_state[-1] == '1':
+                                return 1
+                            return 0
+
+                        y_preds = []
+                        comp = get_compiler("native")
+                        
+                        for i, x in enumerate(X_te):
+                            circ = Circuit()
+                            qubits_to_use = min(len(x), 3)
+                            q = circ.allocateQubits(qubits_to_use)
+                            for q_idx in range(qubits_to_use):
+                                circ << (H, q[q_idx])
+                            exe = comp.compile(circ, 0)
+                            try:
+                                res = engine.execute(exe, config)
+                                if res and hasattr(res, "counts"):
+                                    pred_label = _decode_counts(res.counts)
+                                    y_preds.append(pred_label)
+                                else:
+                                    y_preds.append(0)
+                                time.sleep(0.2)
+                            except Exception:
+                                y_preds.append(0)
+                                
+                        y_true = np.array(y_te[:len(y_preds)])
+                        y_pred = np.array(y_preds)
+                        
+                        spinq_results = {
+                            "metrics": {
+                                "accuracy": float(accuracy_score(y_true, y_pred)),
+                                "precision": float(precision_score(y_true, y_pred, zero_division=0)),
+                                "recall": float(recall_score(y_true, y_pred, zero_division=0)),
+                                "f1_score": float(f1_score(y_true, y_pred, zero_division=0)),
+                            },
+                            "confusion_matrix": confusion_matrix(y_true, y_pred).tolist(),
+                            "prediction_counts": {
+                                "normal": int(np.sum(y_pred == 0)),
+                                "intrusion": int(np.sum(y_pred == 1))
+                            },
+                            "rows": len(y_preds)
+                        }
+                        
+                        st.session_state["spinq_lab_results"] = spinq_results
                         st.success("¡Validación física en SpinQ completada con éxito!")
-                        
-                        # Mostramos los resultados en pantalla de forma visual
-                        st.markdown("### Resultados obtenidos del equipo RMN:")
-                        for idx, counts in enumerate(counts_list):
-                            st.write(f"**Muestra {idx + 1}** (Referencia real: *{y_te[idx]}*) -> Cuentas físicas: `{counts}`")
-                        
+                            
                     except Exception as e:
                         st.error(f"Error al conectar con la SpinQ: {e}")
 
+        # Renderizado visual de las métricas y matriz de confusión de la SpinQ
+        spinq_lab_results = st.session_state.get("spinq_lab_results")
+        if spinq_lab_results and "metrics" in spinq_lab_results:
+            st.write("")
+            st.markdown("### Resultados de la Validación Física (SpinQ)")
+            
+            metric_cols = st.columns(4)
+            with metric_cols[0]:
+                render_metric_card("Accuracy", spinq_lab_results["metrics"]["accuracy"], "Hardware SpinQ")
+            with metric_cols[1]:
+                render_metric_card("Precision", spinq_lab_results["metrics"]["precision"], "Hardware SpinQ")
+            with metric_cols[2]:
+                render_metric_card("Recall", spinq_lab_results["metrics"]["recall"], "Hardware SpinQ")
+            with metric_cols[3]:
+                render_metric_card("F1-Score", spinq_lab_results["metrics"]["f1_score"], "Hardware SpinQ")
+
+            st.write("")
+            count_cols = st.columns(2)
+            with count_cols[0]:
+                render_info_card("Predicciones normales", str(spinq_lab_results["prediction_counts"]["normal"]), "Cantidad predicha como tráfico benigno.")
+            with count_cols[1]:
+                render_info_card("Predicciones de intrusión", str(spinq_lab_results["prediction_counts"]["intrusion"]), "Cantidad predicha como tráfico malicioso.")
+
+            if "confusion_matrix" in spinq_lab_results:
+                st.write("")
+                st.plotly_chart(
+                    make_confusion_chart(np.array(spinq_lab_results["confusion_matrix"]), height=320),
+                    width="stretch",
+                    key="lab_spinq_confusion_chart"
+                )
     with right:
         render_info_card("Estado del modelo", "Quantum Kernel (QSVM)", "Modelo activo basado en matrices de fidelidad cuántica + SVC precomputado.")
         st.write("")
@@ -268,8 +346,8 @@ def _render_quantum_lab(
 def _render_classical_lab(model_data: ModelData) -> None:
     left, right = st.columns([1.15, 1])
     with left:
-        st.markdown("#### Baseline clasico")
-        st.caption("Aca se prueba el modelo clasico ya entrenado. Sirve como referencia principal porque hoy es el enfoque mas estable del sistema.")
+        st.markdown("#### Baseline clásico")
+        st.caption("Acá se evalúa el modelo clásico. Si los artefactos no existen, se entrenan y guardan automáticamente al presionar el botón.")
         source = st.radio("Dataset de entrada", ["Usar data/dataset.csv", "Subir CSV propio"], horizontal=True, key="classical_data_source")
         uploaded_file = None
         if source == "Subir CSV propio":
@@ -278,10 +356,10 @@ def _render_classical_lab(model_data: ModelData) -> None:
         use_holdout = st.checkbox(
             "Reproducir holdout 80/20 del entrenamiento",
             value=(source == "Usar data/dataset.csv"),
-            help="Si esta activo, recrea el split del pipeline clasico y evalua sobre el 20% de test.",
+            help="Si está activo, recrea el split del pipeline clásico y evalúa sobre el 20% de test.",
             key="classical_holdout_checkbox",
         )
-        run_button = st.button("Ejecutar prueba clasica", width="stretch", type="primary", key="run_classical_button")
+        run_button = st.button("Ejecutar prueba clásica", width="stretch", type="primary", key="run_classical_button")
 
     with right:
         st.caption("Estado de artefactos")
@@ -289,29 +367,41 @@ def _render_classical_lab(model_data: ModelData) -> None:
             f"Modelo: {'ok' if CLASSICAL_MODEL_PATH.exists() else 'faltante'}\n\n"
             f"Scaler: {'ok' if SCALER_PATH.exists() else 'faltante'}\n\n"
             f"PCA: {'ok' if PCA_PATH.exists() else 'faltante'}\n\n"
-            f"Metricas: {'ok' if CLASSICAL_RESULTS_PATH.exists() else 'faltante'}"
+            f"Métricas: {'ok' if CLASSICAL_RESULTS_PATH.exists() else 'faltante'}"
         )
         st.write("")
-        render_info_card("Estado clasico", model_data["Modelo clasico"]["source_label"], "El dashboard usa metricas reales del clasico si encuentra results/classical_metrics.json.")
+        render_info_card("Estado clásico", model_data["Modelo clasico"]["source_label"], "El dashboard usa métricas reales del clásico si encuentra results/classical_metrics.json.")
 
     if run_button:
         progress_placeholder = st.empty()
         try:
-            with st.spinner("Ejecutando prueba clasica y calculando metricas..."):
-                progress_placeholder.info("Preparando dataset para evaluacion...")
+            with st.spinner("Procesando pipeline clásico..."):
+                # 1. Verificamos si faltan los artefactos y los entrenamos de forma transparente al usuario
+                if not (CLASSICAL_MODEL_PATH.exists() and SCALER_PATH.exists() and PCA_PATH.exists() and CLASSICAL_RESULTS_PATH.exists()):
+                    progress_placeholder.info("No se encontraron los artefactos guardados. Entrenando modelo clásico automáticamente...")
+                    import subprocess
+                    import sys
+                    result = subprocess.run([sys.executable, "-m", "src.classical.train_model"], capture_output=True, text=True)
+                    if result.returncode != 0:
+                        raise RuntimeError(f"Error al entrenar automáticamente: {result.stderr}")
+
+                # 2. Preparamos el dataset para la evaluación
+                progress_placeholder.info("Preparando dataset para evaluación...")
                 if source == "Usar data/dataset.csv":
                     if not DATASET_PATH.exists():
                         raise FileNotFoundError("No existe data/dataset.csv.")
                     df = pd.read_csv(DATASET_PATH)
                 else:
                     if uploaded_file is None:
-                        raise ValueError("Subi un CSV antes de ejecutar la prueba.")
+                        raise ValueError("Subí un CSV antes de ejecutar la prueba.")
                     df = pd.read_csv(BytesIO(uploaded_file.getvalue()))
 
-                progress_placeholder.info("Aplicando scaler, PCA y modelo clasico...")
+                # 3. Ejecutamos la evaluación
+                progress_placeholder.info("Aplicando scaler, PCA y modelo clásico...")
                 results = evaluate_classical_dataset(df, use_holdout_split=use_holdout)
                 st.session_state["lab_results"] = results
                 st.session_state["lab_source"] = source
+                
             progress_placeholder.empty()
         except Exception as error:
             progress_placeholder.empty()
@@ -330,25 +420,22 @@ def _render_classical_lab(model_data: ModelData) -> None:
                 render_metric_card("Recall", lab_results["metrics"]["recall"], "Resultado de la prueba")
             with metric_cols[3]:
                 render_metric_card("F1-Score", lab_results["metrics"]["f1_score"], "Resultado de la prueba")
-            st.caption(
-                "Si ves valores muy altos, no significa que el problema sea trivial: este modelo ya viene muy ajustado al dataset de referencia. Por eso mostramos tambien precision y recall."
-            )
         else:
             with metric_cols[0]:
                 render_info_card("Registros", str(lab_results["rows"]), "Muestras evaluadas")
             with metric_cols[1]:
                 render_info_card("Normal", str(lab_results["prediction_counts"]["normal"]), "Predicciones benignas")
             with metric_cols[2]:
-                render_info_card("Intrusion", str(lab_results["prediction_counts"]["intrusion"]), "Predicciones positivas")
+                render_info_card("Intrusión", str(lab_results["prediction_counts"]["intrusion"]), "Predicciones positivas")
             with metric_cols[3]:
                 render_info_card("Fuente", "Sin etiqueta", "Solo se muestran predicciones")
 
         st.write("")
         count_cols = st.columns(2)
         with count_cols[0]:
-            render_info_card("Predicciones normales", str(lab_results["prediction_counts"]["normal"]), "Cantidad predicha como trafico benigno.")
+            render_info_card("Predicciones normales", str(lab_results["prediction_counts"]["normal"]), "Cantidad predicha como tráfico benigno.")
         with count_cols[1]:
-            render_info_card("Predicciones de intrusion", str(lab_results["prediction_counts"]["intrusion"]), "Cantidad predicha como trafico malicioso.")
+            render_info_card("Predicciones de intrusión", str(lab_results["prediction_counts"]["intrusion"]), "Cantidad predicha como tráfico malicioso.")
 
         if "confusion_matrix" in lab_results:
             st.write("")
