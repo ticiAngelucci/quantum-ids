@@ -26,7 +26,7 @@ def render_overview_tab(model_data: ModelData, selected_model: str) -> None:
     )
 
     # --- SECCIÓN: LA HIPÓTESIS Y LA DIFERENCIA CLAVE ---
-    st.markdown("### 🔬 Hipótesis y Diferencia de Paradigmas")
+    st.markdown("### Hipótesis y Diferencia de Paradigmas")
     st.caption("El fundamento técnico que separa ambos enfoques de procesamiento.")
     
     col_h1, col_h2 = st.columns(2)
@@ -35,7 +35,7 @@ def render_overview_tab(model_data: ModelData, selected_model: str) -> None:
         st.markdown(
             """
             <div style="background: rgba(10, 30, 64, 0.85); border: 1px solid rgba(253, 185, 19, 0.3); border-radius: 14px; padding: 1.5rem; height: 100%;">
-                <span style="color: #FDB913; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em;">💻 Enfoque Tradicional (Clásico)</span>
+                <span style="color: #FDB913; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em;">Enfoque Tradicional (Clásico)</span>
                 <h3 style="color: #FFFFFF; font-size: 1.3rem; margin: 0.4rem 0 0.8rem 0;">Determinista & Tabular</h3>
                 <p style="color: #C8D6E5; font-size: 0.95rem; line-height: 1.5; margin: 0;">
                     La computación clásica procesa los flujos de red evaluando variables de manera secuencial o mediante árboles de decisión (como Random Forest). Cada regla o nodo toma decisiones deterministas o basadas en frecuencias fijas sobre atributos estáticos.
@@ -49,7 +49,7 @@ def render_overview_tab(model_data: ModelData, selected_model: str) -> None:
         st.markdown(
             """
             <div style="background: rgba(10, 30, 64, 0.85); border: 1px solid rgba(253, 185, 19, 0.3); border-radius: 14px; padding: 1.5rem; height: 100%;">
-                <span style="color: #FDB913; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em;">⚛️ Enfoque Cuántico (QSVM / RMN)</span>
+                <span style="color: #FDB913; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em;">Enfoque Cuántico (QSVM / RMN)</span>
                 <h3 style="color: #FFFFFF; font-size: 1.3rem; margin: 0.4rem 0 0.8rem 0;">Probabilístico & Amplitudes</h3>
                 <p style="color: #C8D6E5; font-size: 0.95rem; line-height: 1.5; margin: 0;">
                     A diferencia de medir una sola vez y descartar, <b>la computación cuántica explota superposiciones y entrelazamiento</b>: el circuito se ejecuta múltiples veces (shots) para extraer una <b>distribución de probabilidades y calcular un valor promedio</b>. Esto captura correlaciones ocultas que el método clásico pasa por alto.
@@ -63,7 +63,7 @@ def render_overview_tab(model_data: ModelData, selected_model: str) -> None:
     st.markdown("---")
 
     # --- SECCIÓN: EJES DE COMPARACIÓN DIRECTA ---
-    st.markdown("### ⚖️ Ejes de Comparación")
+    st.markdown("### Ejes de Comparación")
     st.caption("Qué se está contrastando analíticamente a lo largo de la investigación.")
     
     col_p1, col_p2, col_p3 = st.columns(3)
@@ -133,7 +133,7 @@ def render_overview_tab(model_data: ModelData, selected_model: str) -> None:
 
     selected_qubits = quantum_qubits_used
     
-    st.markdown("### ⚖️ Rendimiento")
+    st.markdown("### Rendimiento")
     st.caption("Resultados obtenidos (actualizados con las ejecuciones recientes del laboratorio o valores base de referencia).")
 
     comp_cols = st.columns(3)
@@ -151,7 +151,7 @@ def render_overview_tab(model_data: ModelData, selected_model: str) -> None:
         """
         <div style="background: rgba(10, 30, 64, 0.6); border-left: 4px solid #FDB913; padding: 0.9rem 1.2rem; border-radius: 0 8px 8px 0; margin-bottom: 1rem;">
             <p style="color: #E2E8F0; font-size: 0.92rem; margin: 0; line-height: 1.4;">
-                <b>💡 Guía de lectura:</b> Cada bloque vertical agrupa las métricas de evaluación (Accuracy, Precision, Recall y F1-Score). 
+                <b>Guía de lectura:</b> Cada bloque vertical agrupa las métricas de evaluación (Accuracy, Precision, Recall y F1-Score).
                 Permite contrastar visualmente la diferencia de rendimiento entre el modelo tabular tradicional, el simulador cuántico ideal 
                 y el desgaste de rendimiento provocado por el ruido térmico en el equipo físico de RMN (SpinQ).
             </p>
@@ -166,7 +166,7 @@ def render_overview_tab(model_data: ModelData, selected_model: str) -> None:
     st.markdown("---")
 
     # --- SECCIÓN: GLOSARIO TÉCNICO DE MÉTRICAS ---
-    st.markdown("### 📚 ¿Qué significan las métricas evaluadas?")
+    st.markdown("### ¿Qué significan las métricas evaluadas?")
     st.caption("Desglose conceptual de los indicadores utilizados en la consola para medir el éxito del IDS.")
 
     m_col1, m_col2 = st.columns(2)
@@ -174,13 +174,13 @@ def render_overview_tab(model_data: ModelData, selected_model: str) -> None:
         st.markdown(
             """
             <div style="background: rgba(10, 30, 64, 0.85); border: 1px solid rgba(253, 185, 19, 0.2); border-radius: 12px; padding: 1.2rem; margin-bottom: 1rem;">
-                <h5 style="color: #FDB913; margin: 0 0 0.3rem 0;">🎯 Accuracy (Precisión Global)</h5>
+                <h5 style="color: #FDB913; margin: 0 0 0.3rem 0;">Accuracy (Precisión Global)</h5>
                 <p style="color: #C8D6E5; font-size: 0.9rem; margin: 0; line-height: 1.4;">
                     Porcentaje total de decisiones acertadas (tanto tráfico normal como ataques bien clasificados) sobre el total de muestras analizadas.
                 </p>
             </div>
             <div style="background: rgba(10, 30, 64, 0.85); border: 1px solid rgba(253, 185, 19, 0.2); border-radius: 12px; padding: 1.2rem;">
-                <h5 style="color: #FDB913; margin: 0 0 0.3rem 0;">🛡️ Precision (Confiabilidad de Alertas)</h5>
+                <h5 style="color: #FDB913; margin: 0 0 0.3rem 0;">Precision (Confiabilidad de Alertas)</h5>
                 <p style="color: #C8D6E5; font-size: 0.9rem; margin: 0; line-height: 1.4;">
                     Indica qué tan seguro es que un evento marcado como "ataque" lo sea realmente. Evita los falsos positivos (alertas falsas a los analistas).
                 </p>
@@ -192,13 +192,13 @@ def render_overview_tab(model_data: ModelData, selected_model: str) -> None:
         st.markdown(
             """
             <div style="background: rgba(10, 30, 64, 0.85); border: 1px solid rgba(253, 185, 19, 0.2); border-radius: 12px; padding: 1.2rem; margin-bottom: 1rem;">
-                <h5 style="color: #FDB913; margin: 0 0 0.3rem 0;">🔍 Recall (Tasa de Detección)</h5>
+                <h5 style="color: #FDB913; margin: 0 0 0.3rem 0;">Recall (Tasa de Detección)</h5>
                 <p style="color: #C8D6E5; font-size: 0.9rem; margin: 0; line-height: 1.4;">
                     Mide la capacidad del modelo para encontrar y atrapar todos los ataques reales que ocurrieron, evitando que amenazas pasen desapercibidas (falsos negativos).
                 </p>
             </div>
             <div style="background: rgba(10, 30, 64, 0.85); border: 1px solid rgba(253, 185, 19, 0.2); border-radius: 12px; padding: 1.2rem;">
-                <h5 style="color: #FDB913; margin: 0 0 0.3rem 0;">⚖️ F1-Score (Equilibrio General)</h5>
+                <h5 style="color: #FDB913; margin: 0 0 0.3rem 0;">F1-Score (Equilibrio General)</h5>
                 <p style="color: #C8D6E5; font-size: 0.9rem; margin: 0; line-height: 1.4;">
                     Es la <b>media armónica entre Precision y Recall</b>. Es la métrica clave en ciberseguridad porque resume en un solo valor si el modelo detecta bien los ataques sin generar falsas alarmas.
                 </p>

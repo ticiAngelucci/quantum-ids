@@ -85,7 +85,7 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
         )
         st.session_state["selected_quantum_test_size"] = selected_quantum_test_size
         
-        with st.expander("⚙️ Ajustes Avanzados del Feature Map", expanded=False):
+        with st.expander("Ajustes Avanzados del Feature Map", expanded=False):
             st.markdown('<p style="color: #FFFFFF; font-weight: 600; font-size: 0.9rem; margin-bottom: 0.2rem;">Repeticiones del circuito (reps)</p>', unsafe_allow_html=True)
             selected_quantum_feature_map_reps = st.select_slider(
                 "Repeticiones del circuito (reps)",
@@ -116,10 +116,10 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
                 <span style="color: #FDB913; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em;">Diagnóstico Técnico</span>
                 <h4 style="color: #FFFFFF; font-size: 1.15rem; margin: 0.3rem 0 0.8rem 0;">Estado del Motor Cuántico</h4>
                 <div style="font-size: 0.88rem; color: #FFFFFF; line-height: 1.6;">
-                    • <b>Circuitos Qiskit (ZZFeatureMap):</b> ✅ OK <br><span style="color: #A0B3C6; font-size: 0.8rem;">Mapeador de características listo.</span><br><br>
-                    • <b>Kernel Cuántico (Fidelity):</b> ✅ OK <br><span style="color: #A0B3C6; font-size: 0.8rem;">Calcula la matriz de similitud.</span><br><br>
-                    • <b>Clasificador SVM:</b> ✅ OK <br><span style="color: #A0B3C6; font-size: 0.8rem;">Optimizado con kernel precomputado.</span><br><br>
-                    • <b>Dataset Base:</b> ✅ OK <br><span style="color: #A0B3C6; font-size: 0.8rem;">CICIDS2017 preparado.</span>
+                    • <b>Circuitos Qiskit (ZZFeatureMap):</b> OK <br><span style="color: #A0B3C6; font-size: 0.8rem;">Mapeador de características listo.</span><br><br>
+                    • <b>Kernel Cuántico (Fidelity):</b> OK <br><span style="color: #A0B3C6; font-size: 0.8rem;">Calcula la matriz de similitud.</span><br><br>
+                    • <b>Clasificador SVM:</b> OK <br><span style="color: #A0B3C6; font-size: 0.8rem;">Optimizado con kernel precomputado.</span><br><br>
+                    • <b>Dataset Base:</b> OK <br><span style="color: #A0B3C6; font-size: 0.8rem;">CICIDS2017 preparado.</span>
                 </div>
             </div>
             """,
@@ -694,7 +694,7 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
             else:
 
                 status_box.info(
-                    "🔄 [1/5] Cargando y preprocesando "
+                    "[1/5] Cargando y preprocesando "
                     "dataset CICIDS2017..."
                 )
 
@@ -736,7 +736,7 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
                 y_test = dataset_bundle.y_test
 
                 status_box.info(
-                    f"🔄 [2/5] Construyendo ZZFeatureMap "
+                    f"[2/5] Construyendo ZZFeatureMap "
                     f"con {selected_quantum_qubits} qubits..."
                 )
 
@@ -756,7 +756,7 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
                     y_test = y_test[:16]
 
                 status_box.info(
-                    "🔄 [3/5] Calculando Kernel de entrenamiento..."
+                    "[3/5] Calculando Kernel de entrenamiento..."
                 )
 
                 train_kernel_matrix = quantum_kernel.evaluate(
@@ -764,7 +764,7 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
                 )
 
                 status_box.info(
-                    "🔄 [4/5] Calculando Kernel de test..."
+                    "[4/5] Calculando Kernel de test..."
                 )
 
                 test_kernel_matrix = quantum_kernel.evaluate(
@@ -773,7 +773,7 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
                 )
 
                 status_box.info(
-                    "🔄 [5/5] Entrenando SVM..."
+                    "[5/5] Entrenando SVM..."
                 )
 
                 qsvm = SVC(
@@ -853,13 +853,13 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
             status_box.empty()
 
             st.error(
-                f"❌ Error crítico al ejecutar "
+                f"Error crítico al ejecutar "
                 f"el Quantum Kernel: {error}"
             )
 
             # Para desarrollo: muestra traceback completo
             with st.expander(
-                "🔎 Detalle técnico del error",
+                "Detalle técnico del error",
                 expanded=False,
             ):
                 import traceback
@@ -893,7 +893,7 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
         st.markdown("<div style='margin-top: 2rem;'></div>", unsafe_allow_html=True)
         st.markdown("---")
         st.subheader(
-            f"📊 Resultados del QSVM · {target_label} "
+            f"Resultados del QSVM · {target_label} "
             f"({evaluated_rows:,} registros evaluados)"
         )
 
@@ -933,10 +933,10 @@ def _render_classical_lab(model_data: ModelData) -> None:
         run_button = st.button("Ejecutar prueba clásica", width="stretch", type="primary", key="run_classical_button")
 
     with right:
-        model_status = "✅ OK" if CLASSICAL_MODEL_PATH.exists() else "❌ Faltante"
-        scaler_status = "✅ OK" if SCALER_PATH.exists() else "❌ Faltante"
-        pca_status = "✅ OK" if PCA_PATH.exists() else "❌ Faltante"
-        metrics_status = "✅ OK" if CLASSICAL_RESULTS_PATH.exists() else "❌ Faltante"
+        model_status = "OK" if CLASSICAL_MODEL_PATH.exists() else "Faltante"
+        scaler_status = "OK" if SCALER_PATH.exists() else "Faltante"
+        pca_status = "OK" if PCA_PATH.exists() else "Faltante"
+        metrics_status = "OK" if CLASSICAL_RESULTS_PATH.exists() else "Faltante"
 
         st.markdown(
             f"""
@@ -958,7 +958,7 @@ def _render_classical_lab(model_data: ModelData) -> None:
         status_container = st.empty()
         
         try:
-            status_container.info("🔄 Verificando artefactos y cargando modelo...")
+            status_container.info("Verificando artefactos y cargando modelo...")
             time.sleep(0.4)
             
             if not (CLASSICAL_MODEL_PATH.exists() and SCALER_PATH.exists() and PCA_PATH.exists() and CLASSICAL_RESULTS_PATH.exists()):
@@ -975,16 +975,16 @@ def _render_classical_lab(model_data: ModelData) -> None:
             results = evaluate_classical_dataset(df, use_holdout_split=use_holdout)
             st.session_state["lab_results"] = results
             
-            status_container.success("✅ ¡Prueba del modelo clásico ejecutada correctamente!")
+            status_container.success("¡Prueba del modelo clásico ejecutada correctamente!")
             
         except Exception as error:
-            status_container.error(f"❌ Error: {error}")
+            status_container.error(f"Error: {error}")
 
     lab_results = st.session_state.get("lab_results")
     if lab_results:
         st.markdown("<div style='margin-top: 2rem;'></div>", unsafe_allow_html=True)
         st.markdown("---")
-        st.subheader(f"📊 Resultados del Baseline Clásico ({lab_results['rows']:,} registros evaluados)")
+        st.subheader(f"Resultados del Baseline Clásico ({lab_results['rows']:,} registros evaluados)")
         
         c1, c2, c3, c4 = st.columns(4)
         m = lab_results['metrics']
@@ -1028,7 +1028,7 @@ def render_lab_tab(
     
     if selected_model == "Modelo cuantico":
         if selected_quantum_dataset_source == "live":
-            st.info("ℹ️ El origen de datos `Live` se gestiona directamente desde la solapa `Live`.")
+            st.info("El origen de datos `Live` se gestiona directamente desde la solapa `Live`.")
             return
         _render_quantum_lab(model_data, selected_quantum_qubits, selected_quantum_dataset_source)
         return

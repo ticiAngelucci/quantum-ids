@@ -89,12 +89,12 @@ def render_sidebar_controls(
         current_step = st.session_state.get("journey_radio", st.session_state.get("current_step", "1. Resumen"))
         
         # 1. QUANTUM IDS (Primero)
-        st.markdown("## 🛡️ Quantum IDS")
+        st.markdown("## Quantum IDS")
         st.caption("Detección de intrusiones con algoritmos cuánticos.")
         st.markdown("---")
 
         # 2. CONFIGURACIÓN (Segundo)
-        st.markdown("### ⚙️ Configuración")
+        st.markdown("### Configuración")
         available_models = [model_name for model_name in ENABLED_MODEL_OPTIONS if model_name in model_data]
         default_model = st.session_state.get("selected_model", "Modelo clasico")
         if default_model not in available_models:
@@ -171,7 +171,7 @@ def render_sidebar_controls(
         st.markdown("---")
 
         # 3. MENÚ (Tercero)
-        st.markdown("### 🧭 Navegación")
+        st.markdown("### Navegación")
         current_step = st.radio(
             "Sección",
             options=section_options,
@@ -187,12 +187,30 @@ def render_sidebar_controls(
 
         # 4. RESUMEN (Cuarto - Título cambiado y prolijo)
         model = model_data[selected_model]
-        st.markdown("### 📊 Estado del Modelo")
-        st.write(
-            f"• Modelo: **{model['short_label']}**\n\n"
-            f"• Precisión: **{model['accuracy']:.1%}**\n\n"
-            f"• Enfoque: **{model['description']}**"
-        )
+        st.markdown("### Estado del Modelo")
+        if selected_model == "Modelo cuantico":
+            active_target = (
+                st.session_state.get("live_quantum_execution_target", "simulator")
+                if current_step == "3. Live"
+                else st.session_state.get("quantum_execution_target_radio", "simulator")
+            )
+            target_label = {
+                "simulator": "Simulador Local Qiskit",
+                "ibm_validate": "Prevalidación para IBM Quantum",
+                "spinq": "SpinQ Triangulum",
+            }.get(active_target, str(active_target))
+            st.write(
+                f"• Modelo: **QSVM (Quantum Kernel)**\n\n"
+                f"• Entorno: **{target_label}**\n\n"
+                f"• Qubits: **{selected_quantum_qubits}**\n\n"
+                f"• Accuracy de referencia: **{model['accuracy']:.1%}**"
+            )
+        else:
+            st.write(
+                "• Modelo: **Random Forest**\n\n"
+                "• Enfoque: **Baseline clásico supervisado**\n\n"
+                f"• Accuracy de referencia: **{model['accuracy']:.1%}**"
+            )
 
     return SidebarSelection(
         selected_model=selected_model,

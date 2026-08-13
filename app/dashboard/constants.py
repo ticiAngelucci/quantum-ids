@@ -52,8 +52,8 @@ MODEL_DATA = {
     },
     "Modelo cuantico": {
         "label": "Modelo cuantico",
-        "short_label": "QML",
-        "description": "Circuito variacional ejecutado en entorno cuantico controlado.",
+        "short_label": "QSVM",
+        "description": "Quantum Kernel de fidelidad con SVC precomputado.",
         "accuracy": 0.918,
         "precision": 0.904,
         "recall": 0.929,

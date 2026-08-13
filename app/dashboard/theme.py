@@ -17,7 +17,7 @@ from dashboard.constants import (
 def configure_page() -> None:
     st.set_page_config(
         page_title="Quantum IDS · Panel de Control",
-        page_icon="⚡",
+        page_icon="Q",
         layout="wide",
         initial_sidebar_state="expanded",
     )

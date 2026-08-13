@@ -486,6 +486,7 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
     # ==========================================
     with st.container():
         if run_spinq_live_btn:
+            st.session_state.pop("spinq_live_results", None)
             spinq_status_placeholder = st.empty()
             spinq_status_placeholder.info(
                 "Circuitos completados: 0 de 7 | "
@@ -659,6 +660,7 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
                     "rows": len(y_pred),
                     "sample_size": len(y_pred),
                     "execution_target": "spinq",
+                    "pipeline_version": "qsvm_fidelity_v1",
                     "train_kernel_matrix": train_kernel.tolist(),
                     "test_kernel_matrix": test_kernel.tolist(),
                 }
@@ -675,11 +677,12 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
         live_execution_target == "spinq"
         and spinq_live_res
         and "metrics" in spinq_live_res
+        and spinq_live_res.get("pipeline_version") == "qsvm_fidelity_v1"
     ):
         st.markdown("<div style='margin-top: 2rem;'></div>", unsafe_allow_html=True)
         st.markdown("---")
         st.subheader(
-            f"📊 Resultados del QSVM Live · SpinQ Triangulum "
+            f"Resultados del QSVM Live · SpinQ Triangulum "
             f"({spinq_live_res.get('rows', 0):,} registros evaluados)"
         )
         sq_cols = st.columns(4)
@@ -729,7 +732,7 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
             else "Simulador Local"
         )
         st.subheader(
-            f"📊 Resultados del QSVM Live · {runtime_label} "
+            f"Resultados del QSVM Live · {runtime_label} "
             f"({evaluated_rows:,} registros evaluados)"
         )
         metric_cols = st.columns(4)

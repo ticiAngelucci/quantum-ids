@@ -157,7 +157,7 @@ def render_analysis_tab(model_data: ModelData, selected_model: str, selected_qua
 
     st.write("")
     st.markdown("---")
-    st.markdown("### 🎓 Síntesis de la investigación")
+    st.markdown("### Síntesis de la investigación")
     st.caption(
         "Conclusiones construidas a partir del contraste entre el baseline clásico, "
         "la simulación cuántica y la ejecución en hardware real."
