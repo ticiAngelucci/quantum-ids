@@ -10,13 +10,23 @@ from dashboard.analytics import (
     make_time_chart,
 )
 from dashboard.types import ModelData
-from dashboard.ui import render_info_card, render_spotlight_panel, section_header
+from dashboard.ui import render_info_card, render_spotlight_panel
 
 
 def render_analysis_tab(model_data: ModelData, selected_model: str, selected_quantum_dataset_source: str) -> None:
-    section_header(
-        "Analisis",
-        "Lectura comparativa de rendimiento, ruido, tiempos y estabilidad experimental.",
+    st.markdown(
+        """
+        <div style="padding: 0.5rem 0 1.5rem 0; border-bottom: 2px solid #FDB913; margin-bottom: 2rem;">
+            <span style="color: #FDB913; font-weight: 800; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em;">Tesina de Licenciatura en Sistemas</span>
+            <h1 style="margin: 0.3rem 0; font-size: 2.6rem; color: #FFFFFF; font-weight: 900;">Análisis y Síntesis</h1>
+            <p style="color: #A0B3C6; margin: 0; font-size: 1.1rem; line-height: 1.5;">
+                Lectura integrada de los resultados experimentales del IDS: rendimiento predictivo, costo temporal,
+                estabilidad, efecto del ruido y alcance actual del hardware cuántico. Esta sección conecta la
+                evidencia técnica con las conclusiones centrales de la investigación.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
     quantum_source_label = model_data["Modelo cuantico"].get("dataset_source_label", "CICIDS2017")
     render_spotlight_panel(
@@ -144,3 +154,92 @@ def render_analysis_tab(model_data: ModelData, selected_model: str, selected_qua
                 ("Hardware", f"{model_data['Hardware cuantico real']['execution_time']:.1f}s"),
             ],
         )
+
+    st.write("")
+    st.markdown("---")
+    st.markdown("### 🎓 Síntesis de la investigación")
+    st.caption(
+        "Conclusiones construidas a partir del contraste entre el baseline clásico, "
+        "la simulación cuántica y la ejecución en hardware real."
+    )
+
+    classical = model_data["Modelo clasico"]
+    simulated = model_data["Modelo cuantico"]
+    hardware = model_data["Hardware cuantico real"]
+    accuracy_gap = simulated["accuracy"] - hardware["accuracy"]
+    f1_gap = simulated["f1_score"] - hardware["f1_score"]
+
+    conclusion_cols = st.columns(3)
+    with conclusion_cols[0]:
+        st.markdown(
+            f"""
+            <div style="background: rgba(10, 30, 64, 0.85); border: 1px solid rgba(253, 185, 19, 0.3); border-radius: 14px; padding: 1.4rem; height: 100%;">
+                <span style="color: #FDB913; font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em;">Hallazgo 01</span>
+                <h4 style="color: #FFFFFF; margin: 0.35rem 0 0.7rem 0;">Baseline operativo</h4>
+                <p style="color: #C8D6E5; font-size: 0.92rem; line-height: 1.5; margin: 0;">
+                    Random Forest conserva la referencia más madura para despliegue: alcanza
+                    <b>{classical['accuracy']:.1%} de accuracy</b> y <b>{classical['f1_score']:.1%} de F1</b>,
+                    con menor costo computacional y una operación más estable.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with conclusion_cols[1]:
+        st.markdown(
+            f"""
+            <div style="background: rgba(10, 30, 64, 0.85); border: 1px solid rgba(253, 185, 19, 0.3); border-radius: 14px; padding: 1.4rem; height: 100%;">
+                <span style="color: #FDB913; font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em;">Hallazgo 02</span>
+                <h4 style="color: #FFFFFF; margin: 0.35rem 0 0.7rem 0;">Valor experimental del QSVM</h4>
+                <p style="color: #C8D6E5; font-size: 0.92rem; line-height: 1.5; margin: 0;">
+                    El kernel cuántico constituye una línea experimental verificable: la corrida disponible registra
+                    <b>{simulated['accuracy']:.1%} de accuracy</b>. Su aporte actual es explorar representaciones y
+                    correlaciones alternativas, no reemplazar anticipadamente al baseline clásico.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with conclusion_cols[2]:
+        st.markdown(
+            f"""
+            <div style="background: rgba(10, 30, 64, 0.85); border: 1px solid rgba(253, 185, 19, 0.3); border-radius: 14px; padding: 1.4rem; height: 100%;">
+                <span style="color: #FDB913; font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em;">Hallazgo 03</span>
+                <h4 style="color: #FFFFFF; margin: 0.35rem 0 0.7rem 0;">Brecha de hardware</h4>
+                <p style="color: #C8D6E5; font-size: 0.92rem; line-height: 1.5; margin: 0;">
+                    La ejecución física permite medir el costo de abandonar el entorno ideal. La brecha observada es de
+                    <b>{accuracy_gap:.1%} en accuracy</b> y <b>{f1_gap:.1%} en F1</b>; debe interpretarse junto con ruido,
+                    shots, latencia y tamaño de muestra.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.write("")
+    st.markdown(
+        """
+        <div style="background: rgba(10, 30, 64, 0.65); border-left: 4px solid #FDB913; padding: 1rem 1.25rem; border-radius: 0 10px 10px 0;">
+            <p style="color: #FFFFFF; font-weight: 800; margin: 0 0 0.4rem 0;">Conclusión integradora</p>
+            <p style="color: #C8D6E5; font-size: 0.95rem; line-height: 1.55; margin: 0;">
+                La evidencia sostiene una arquitectura híbrida: el modelo clásico funciona como referencia operativa,
+                mientras que el QSVM y la SpinQ permiten estudiar empíricamente el potencial y las restricciones de la
+                computación cuántica aplicada a ciberseguridad. La contribución de la tesina no depende de afirmar una
+                ventaja cuántica inmediata, sino de establecer un pipeline reproducible para compararla bajo las mismas
+                muestras, métricas y condiciones experimentales.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("---")
+    st.markdown(
+        """
+        <div style="text-align: center; padding: 1.5rem 0; color: #A0B3C6; font-size: 0.9rem;">
+            <p style="margin: 0; color: #FFFFFF; font-weight: 700;">Quantum IDS · Tesina de Licenciatura en Sistemas</p>
+            <p style="margin: 0.3rem 0 0 0;">Autor: <b>Ticiana Angelucci</b> | Universidad Champagnat | 2026</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )

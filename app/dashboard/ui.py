@@ -83,8 +83,7 @@ def render_sidebar_controls(
         "1. Resumen",
         "2. Experimentar",
         "3. Live",
-        "4. Analisis",
-        "5. Conclusiones",
+        "4. Análisis y Síntesis",
     ]
     with st.sidebar:
         current_step = st.session_state.get("journey_radio", st.session_state.get("current_step", "1. Resumen"))
@@ -128,11 +127,29 @@ def render_sidebar_controls(
                 )
                 st.session_state["selected_quantum_dataset_source"] = selected_quantum_dataset_source
 
+            spinq_selected = (
+                current_step == "2. Experimentar"
+                and st.session_state.get("quantum_execution_target_radio") == "spinq"
+            ) or (
+                current_step == "3. Live"
+                and st.session_state.get("live_quantum_execution_target") == "spinq"
+            )
+            if spinq_selected:
+                selected_quantum_qubits = 3
+                st.session_state["selected_quantum_qubits"] = 3
+                st.session_state["quantum_results_selectbox"] = 3
+
             chosen_qubits = st.selectbox(
                 "Número de Qubits",
                 options=list(SUPPORTED_QUANTUM_QUBITS),
                 index=list(SUPPORTED_QUANTUM_QUBITS).index(selected_quantum_qubits),
                 key="quantum_results_selectbox",
+                disabled=spinq_selected,
+                help=(
+                    "SpinQ Triangulum utiliza exactamente 3 qubits."
+                    if spinq_selected
+                    else None
+                ),
             )
             if chosen_qubits != selected_quantum_qubits:
                 st.session_state["selected_quantum_qubits"] = chosen_qubits
@@ -149,6 +166,7 @@ def render_sidebar_controls(
         if current_step not in section_options:
             current_step = section_options[0]
             st.session_state["current_step"] = current_step
+            st.session_state["journey_radio"] = current_step
 
         st.markdown("---")
 

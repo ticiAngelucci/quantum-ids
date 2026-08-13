@@ -19,7 +19,6 @@ from dashboard.types import SidebarSelection
 from dashboard.ui import render_header, render_sidebar_controls
 from dashboard.views import (
     render_analysis_tab,
-    render_conclusion_tab,
     render_lab_tab,
     render_live_tab,
     render_overview_tab,
@@ -34,6 +33,21 @@ def main() -> None:
         st.session_state["current_step"] = "1. Resumen"
 
     selected_quantum_qubits = st.session_state.get("selected_quantum_qubits", 4)
+    active_step = st.session_state.get(
+        "journey_radio",
+        st.session_state.get("current_step", "1. Resumen"),
+    )
+    spinq_is_active = (
+        active_step == "2. Experimentar"
+        and st.session_state.get("quantum_execution_target_radio") == "spinq"
+    ) or (
+        active_step == "3. Live"
+        and st.session_state.get("live_quantum_execution_target") == "spinq"
+    )
+    if spinq_is_active:
+        selected_quantum_qubits = 3
+        st.session_state["selected_quantum_qubits"] = 3
+        st.session_state["quantum_results_selectbox"] = 3
     selected_quantum_dataset_source = st.session_state.get("selected_quantum_dataset_source", "cicids")
 
     model_data = get_model_data(
@@ -62,10 +76,10 @@ def main() -> None:
         )
     elif selection.current_step == "3. Live":
         render_live_tab(model_data, selection.selected_quantum_qubits)
-    elif selection.current_step == "4. Analisis":
+    elif selection.current_step == "4. Análisis y Síntesis":
         render_analysis_tab(model_data, selection.selected_model, selection.selected_quantum_dataset_source)
     else:
-        render_conclusion_tab(model_data, selection.selected_model)
+        render_overview_tab(model_data, selection.selected_model)
 
 
 if __name__ == "__main__":

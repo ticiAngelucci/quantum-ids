@@ -1,188 +1,273 @@
-# quantum-ids
+<div align="center">
 
-`quantum-ids` es un proyecto experimental de detección de anomalías en tráfico de red que compara:
+# Quantum IDS
 
-- un baseline clásico con `Random Forest`
-- un enfoque de `Quantum Machine Learning` con `VQC`
-- una validación opcional sobre `IBM Quantum`
+### Detección de intrusiones con Machine Learning clásico y computación cuántica
 
-El proyecto también incluye un flujo `live` para capturar tráfico en ventanas, extraer features agregadas y usarlas como dataset experimental para el modelo cuántico.
+![Azul Boca](https://img.shields.io/badge/Identidad-Azul%20Boca-003B7A?style=for-the-badge)
+![Oro Boca](https://img.shields.io/badge/Contraste-Oro%20Boca-FDB913?style=for-the-badge&labelColor=003B7A)
+![Python](https://img.shields.io/badge/Python-3.10+-003B7A?style=for-the-badge&logo=python&logoColor=FDB913)
+![Streamlit](https://img.shields.io/badge/Dashboard-Streamlit-FDB913?style=for-the-badge&logo=streamlit&logoColor=003B7A)
 
-## Estructura
+**Tesina de Licenciatura en Sistemas**<br>
+Ticiana Angelucci · Universidad Champagnat · 2026
+
+</div>
+
+---
+
+## Descripción
+
+Quantum IDS es una plataforma experimental para comparar estrategias de detección de intrusiones en redes mediante:
+
+- un baseline clásico basado en **Random Forest**;
+- un **Quantum Support Vector Machine (QSVM)** con kernel de fidelidad;
+- simulación local mediante **Qiskit**;
+- validación física sobre una **SpinQ Triangulum de 3 qubits**, conectada mediante SpinQuasar;
+- captura y evaluación de tráfico en vivo por ventanas.
+
+La investigación utiliza CICIDS2017 como conjunto de referencia y permite contrastar rendimiento, estabilidad, costo computacional y efecto del ruido al pasar del entorno ideal al hardware cuántico real.
+
+> [!IMPORTANT]
+> El objetivo no es asumir una ventaja cuántica inmediata. La contribución consiste en construir un pipeline reproducible para evaluar los enfoques clásico y cuántico bajo muestras, métricas y condiciones controladas.
+
+## Arquitectura experimental
+
+```text
+Tráfico CICIDS2017 o Live
+            |
+            v
+Limpieza, balanceo y selección de características
+            |
+            +-----------------------------+
+            |                             |
+            v                             v
+ Random Forest                  Codificación en 3-N qubits
+  (baseline)                              |
+                                         v
+                              Kernel cuántico de fidelidad
+                                /                 \
+                               v                   v
+                      Simulador Qiskit       SpinQ Triangulum
+                                \                 /
+                                 v               v
+                                  SVC precomputado
+                                         |
+                                         v
+                    Accuracy · Precision · Recall · F1
+```
+
+El hardware SpinQ calcula similitudes entre pares de muestras. Esas fidelidades forman las matrices de entrenamiento y prueba utilizadas por una SVM clásica con `kernel="precomputed"`.
+
+## Funcionalidades del dashboard
+
+La interfaz mantiene una identidad visual inspirada en los colores de Boca: azul profundo, blanco y oro.
+
+### 1. Resumen
+
+- Presentación de la hipótesis.
+- Contraste entre Random Forest, QSVM y hardware real.
+- Comparación de métricas y paradigmas.
+
+### 2. Experimentar
+
+- Evaluación del baseline clásico.
+- QSVM sobre CICIDS2017.
+- Simulador local Qiskit.
+- Prueba de conectividad SpinQ de un circuito.
+- QSVM piloto SpinQ de siete circuitos.
+- Contador y progreso de las ejecuciones físicas.
+
+### 3. Live
+
+- Captura de tráfico por ventanas.
+- Simuladores de laboratorio v2 y v3 multivectorial.
+- Escenarios benignos y de ataque.
+- Construcción de un dataset Live balanceado.
+- QSVM Live en simulador local o SpinQ.
+
+### 4. Análisis y Síntesis
+
+- Rendimiento comparado.
+- Corridas cuánticas disponibles.
+- Ruido y limitaciones del hardware.
+- Costos temporales.
+- Hallazgos y conclusión integradora de la tesina.
+
+## QSVM sobre SpinQ
+
+La SpinQ Triangulum utiliza exactamente **3 qubits**. Al seleccionar SpinQ, el dashboard fija automáticamente esta dimensionalidad en toda la interfaz.
+
+Cada circuito compara dos muestras mediante:
+
+```text
+U(x_a) -> U†(x_b) -> medición
+```
+
+La fidelidad se estima con la probabilidad de medir `000`:
+
+```text
+fidelidad = counts["000"] / shots_totales
+```
+
+### Modos disponibles
+
+| Modo | Circuitos | Shots por circuito | Propósito |
+|---|---:|---:|---|
+| Conectividad | 1 | 1024 | Verificar la comunicación con SpinQuasar |
+| QSVM piloto | 7 | 1024 | Validar el pipeline completo con datos reales |
+
+> [!WARNING]
+> El piloto utiliza 2 muestras de entrenamiento y 2 de prueba. Sirve para validar integración, construcción del kernel y clasificación, pero sus métricas no son estadísticamente representativas. Por ejemplo, con dos registros de prueba la accuracy sólo puede cambiar en saltos de 50 puntos porcentuales.
+
+## Estructura del proyecto
 
 ```text
 app/
-  app.py                  # entrypoint del dashboard Streamlit
-  dashboard/              # UI modular, gráficos, carga de datos y vistas
-    pages/                # pantallas del dashboard separadas por responsabilidad
+  app.py                         # Entrada principal de Streamlit
+  dashboard/
+    analytics.py                 # Métricas, evaluación y gráficos
+    data.py                      # Carga de resultados y modelos
+    theme.py                     # Tema azul y oro
+    ui.py                        # Componentes compartidos
+    pages/
+      overview.py                # Resumen académico
+      lab.py                     # Laboratorio clásico y QSVM
+      live.py                    # Captura y experimentación Live
+      analysis.py                # Análisis y Síntesis
 
 src/
-  classical/              # entrenamiento y utilidades del modelo clásico
-  live_detection/         # captura live, extracción, curación y compatibilidad
-  preprocessing/          # limpieza, escalado y PCA para QML
-  quantum/                # configuración, runtime, resultados y entrenamiento VQC
-  utils/                  # helpers compartidos
+  classical/                     # Random Forest y baseline Live
+  live_detection/                # Captura y extracción de features
+  preprocessing/                 # Preparación del dataset cuántico
+  quantum/
+    spinq_connector.py           # Configuración SpinQ/SpinQuasar
+    train_qkernel.py             # Entrenamiento del Quantum Kernel
+    train_vqc_simulator.py       # Flujo VQC experimental heredado
+    runtime.py                   # Integraciones de runtime cuántico
+
+scripts/
+  01_attack-scrapy_v2.py         # Simulador avanzado de tráfico
+  01_attack-scrapy_v3.py         # Simulador multivectorial
+
+data/                            # Dataset local, fuera de Git
+results/                         # Modelos y métricas, fuera de Git
+docs/                            # Documentación técnica
 ```
 
-## Puesta en marcha
+## Instalación
 
 ### Requisitos
 
-- Python `3.10` o superior
-- `pip`
-- acceso a una terminal
-- opcional: entorno virtual `venv`
-
-### Ubuntu
-
-```bash
-sudo apt update
-sudo apt install python3 python3-venv python3-pip
-python3 -m venv venv
-source venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
-streamlit run app/app.py
-```
-
-### macOS
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
-streamlit run app/app.py
-```
-
-Si `python3` no existe, primero instalá Python con Homebrew o desde el instalador oficial.
+- Python 3.10 o superior.
+- `pip` y soporte para entornos virtuales.
+- Dataset disponible en `data/dataset.csv`.
+- Para hardware real: Windows, SpinQit, acceso de red a SpinQuasar y credenciales autorizadas.
 
 ### Windows PowerShell
 
 ```powershell
-py -3 -m venv venv
-.\venv\Scripts\Activate.ps1
+py -3.10 -m venv .venv
+.\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 streamlit run app/app.py
 ```
 
-Si PowerShell bloquea la activación del entorno virtual, podés habilitarla para tu usuario con:
+Si PowerShell bloquea la activación:
 
 ```powershell
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
 
-### Windows CMD
+### Linux y macOS
 
-```cmd
-py -3 -m venv venv
-venv\Scripts\activate.bat
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 streamlit run app/app.py
 ```
 
-### URL del dashboard
+El dashboard queda disponible normalmente en:
 
-Cuando Streamlit arranca, normalmente queda disponible en:
+```text
+http://localhost:8501
+```
 
-- `http://localhost:8501`
-- o `http://IP_LOCAL:8501` si lo levantás para verlo desde otra máquina de la red
-
-Ejemplo:
+Para exponerlo en la red local:
 
 ```bash
 streamlit run app/app.py --server.address 0.0.0.0 --server.port 8501
 ```
 
-## Flujos principales
+## Configuración de SpinQ
 
-### 1. Clásico
+SpinQit no forma parte del flujo obligatorio del simulador. Debe instalarse en el mismo entorno virtual utilizado para ejecutar Streamlit:
 
-- dataset base: `data/dataset.csv`
-- entrenamiento: `src/classical/train_model.py`
-- resultados esperados:
-  - `results/classical_metrics.json`
-  - `results/random_forest_model.joblib`
-  - `results/scaler.joblib`
-  - `results/pca.joblib`
-
-### 2. Cuántico sobre CICIDS
-
-- entrenamiento: `src/quantum/train_vqc_simulator.py`
-- fuente de datos: `data/dataset.csv`
-- resultados esperados:
-  - `results/quantum_simulated_metrics.json`
-  - `results/quantum_simulated_metrics_2q.json`
-  - `results/quantum_simulated_metrics_3q.json`
-  - `results/quantum_simulated_metrics_4q.json`
-  - `results/quantum_simulated_metrics_6q.json`
-  - `results/quantum_simulated_metrics_8q.json`
-
-### 3. Cuántico live
-
-- captura por ventanas: `src/live_detection/capture.py`
-- extracción de features: `src/live_detection/feature_extractor.py`
-- enriquecimiento y curación: `src/live_detection/feature_engineering.py`
-- simulador asumido por la UI: `v2`
-- metadata opcional de captura:
-  - `Scenario`
-  - `SimulatorVersion`
-- dataset experimental: `results/live_training_dataset.csv`
-- baseline comparativo sobre live:
-  - `python -m src.classical.train_live_model`
-- resultados clásicos live:
-  - `results/classical_live_metrics.json`
-- entrenamiento cuántico live:
-  - `python -m src.quantum.train_vqc_simulator --dataset-source live --qubits 2`
-
-Si querés aprovechar las mejoras más recientes del flujo `live v2`, conviene reconstruir el CSV desde cero:
-
-```bash
-rm results/live_training_dataset.csv
+```powershell
+python -m pip install spinqit
 ```
 
-Después recapturá ventanas nuevas. Las capturas nuevas incluyen features más discriminativas del tráfico `v2` y permiten curar filas inconsistentes según el escenario del simulador.
+Antes de una prueba física:
 
-## Configuración del VQC
+1. Iniciar SpinQuasar.
+2. Confirmar conectividad de red con el equipo.
+3. Configurar IP, puerto y cuenta de manera local.
+4. Seleccionar `Hardware Real SpinQ` en el dashboard.
+5. Ejecutar primero la prueba de conectividad de un circuito.
 
-El pipeline cuántico hoy se puede ajustar sin tocar código, tanto por CLI como desde el dashboard:
+> [!CAUTION]
+> No publiques IPs privadas, usuarios ni contraseñas del laboratorio. Las credenciales deben gestionarse localmente y quedar fuera del control de versiones.
 
-- `qubits`: `2`, `3`, `4`, `6`, `8`
-- `feature_map_reps`
-- `ansatz_reps`
-- `maxiter` de `COBYLA`
-- `test_size`
+## Datos y resultados
 
-Ejemplo:
+### Dataset principal
 
-```bash
-python -m src.quantum.train_vqc_simulator \
-  --qubits 4 \
-  --feature-map-reps 1 \
-  --ansatz-reps 2 \
-  --maxiter 100 \
-  --test-size 0.2
+```text
+data/dataset.csv
 ```
 
-## Dashboard
+### Artefactos clásicos
 
-El dashboard corre con:
-
-```bash
-streamlit run app/app.py
+```text
+results/random_forest_model.joblib
+results/scaler.joblib
+results/pca.joblib
+results/classical_metrics.json
 ```
 
-Responsabilidades del dashboard:
+### Dataset Live
 
-- cargar métricas reales si existen en `results/`
-- comparar clásico, VQC simulado y hardware real
-- ejecutar pruebas del laboratorio
-- operar el flujo `live` cuántico desde la UI
+```text
+results/live_training_dataset.csv
+```
 
-## Documentación
+Las carpetas `data/` y `results/` están excluidas de Git porque pueden contener datasets grandes, capturas o artefactos generados localmente.
 
-- arquitectura general: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-- flujo live: [src/live_detection/README.md](src/live_detection/README.md)
-- flujo cuántico: [src/quantum/README.md](src/quantum/README.md)
+## Métricas
+
+| Métrica | Interpretación en el IDS |
+|---|---|
+| Accuracy | Proporción total de decisiones correctas |
+| Precision | Confiabilidad de las alertas de ataque |
+| Recall | Capacidad para detectar ataques reales |
+| F1-Score | Equilibrio entre Precision y Recall |
+
+En ciberseguridad no conviene interpretar Accuracy de manera aislada. Un modelo que clasifica todo como benigno puede obtener aciertos y, al mismo tiempo, presentar `Recall = 0` para la clase de ataque.
+
+## Documentación adicional
+
+- [Arquitectura general](docs/ARCHITECTURE.md)
+- [Captura y procesamiento Live](src/live_detection/README.md)
+- [Flujo cuántico](src/quantum/README.md)
+
+---
+
+<div align="center">
+
+**Quantum IDS** · Ciberseguridad & Computación Cuántica<br>
+<sub>Azul para la arquitectura. Oro para la evidencia.</sub>
+
+</div>

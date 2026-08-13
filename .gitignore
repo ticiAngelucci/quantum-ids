@@ -7,3 +7,4 @@ data/
 results/
 *.pcap
 01_attack-scrapy.py
+.venv/

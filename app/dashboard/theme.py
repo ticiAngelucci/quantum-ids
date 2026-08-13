@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import streamlit as st
-
+import cv2
 from dashboard.constants import (
     ACCENT_YELLOW,
     BACKGROUND,
@@ -40,11 +40,34 @@ def inject_css() -> None:
                 color: var(--text-main);
                 font-family: "Segoe UI", Roboto, Helvetica, sans-serif;
             }}
-
+            .stTooltipIcon svg, .stTooltipIcon {{
+                fill: #FFFFFF !important;
+                color: #FFFFFF !important;
+            }}
+            .stRadio label span, 
+            .stCheckbox label span,
+            div[data-baseweb="radio"] div,
+            div[data-baseweb="checkbox"] div,
+            .stRadio p,
+            .stCheckbox p {{
+                color: #FFFFFF !important;
+            }}
+            
             header[data-testid="stHeader"] {{
                 background-color: transparent !important;
             }}
-
+div[data-testid="stNotification"], 
+            div[data-testid="stAlert"] {{
+                background-color: #0A1E40 !important;
+                border: 1px solid rgba(253, 185, 19, 0.4) !important;
+                color: #FFFFFF !important;
+                border-radius: 10px !important;
+            }}
+            div[data-testid="stNotification"] p, 
+            div[data-testid="stAlert"] p {{
+                color: #FFFFFF !important;
+                font-weight: 600 !important;
+            }}
             /* Barra lateral (Azul Boca y acentos Oro) */
             [data-testid="stSidebar"] {{
                 background: linear-gradient(180deg, #051021 0%, #0A1E40 60%, #10316B 100%);
@@ -69,6 +92,22 @@ def inject_css() -> None:
             div[data-baseweb="select"] div,
             input {{
                 color: #FFFFFF !important;
+            }}
+
+            .stSelectbox label p,
+            .stNumberInput label p,
+            .stTextInput label p,
+            .stSlider label p,
+            .stSelectSlider label p,
+            .stFileUploader label p {{
+                color: #FFFFFF !important;
+                font-weight: 600 !important;
+            }}
+
+            .stExpander summary,
+            .stExpander summary p {{
+                color: #FFFFFF !important;
+                font-weight: 700 !important;
             }}
 
             /* Tarjetas y contenedores limpios */

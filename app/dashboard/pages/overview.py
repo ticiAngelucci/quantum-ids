@@ -113,24 +113,36 @@ def render_overview_tab(model_data: ModelData, selected_model: str) -> None:
     st.write("")
     st.markdown("---")
 
-    # --- DATOS RÁPIDOS Y COMPARATIVA CLAVE ---
+    # --- RECUPERACIÓN DE DATOS (CONEXIÓN DINÁMICA CON EL LABORATORIO) ---
     classical = model_data["Modelo clasico"]
     quantum = model_data["Modelo cuantico"]
     hardware = model_data["Hardware cuantico real"]
     
-    selected_dataset_source = model_data["Modelo cuantico"].get("selected_dataset_source", "cicids")
-    selected_qubits = model_data["Modelo cuantico"]["selected_qubits"]
+    # Si el usuario corrió una prueba clásica en el laboratorio, pisamos los valores base con los reales
+    lab_results = st.session_state.get("lab_results")
+    if lab_results and "metrics" in lab_results:
+        classical["accuracy"] = lab_results["metrics"]["accuracy"]
+        classical["f1_score"] = lab_results["metrics"]["f1_score"]
+
+    # Si el usuario corrió una prueba cuántica en el laboratorio, pisamos los valores cuánticos base
+    quantum_lab_results = st.session_state.get("quantum_lab_results")
+    quantum_qubits_used = st.session_state.get("quantum_lab_results_qubits", model_data["Modelo cuantico"]["selected_qubits"])
+    if quantum_lab_results and "metrics" in quantum_lab_results:
+        quantum["accuracy"] = quantum_lab_results["metrics"]["accuracy"]
+        quantum["f1_score"] = quantum_lab_results["metrics"]["f1_score"]
+
+    selected_qubits = quantum_qubits_used
     
     st.markdown("### ⚖️ Rendimiento")
-    st.caption("Resultados obtenidos al contrastar ambas metodologías en la consola.")
+    st.caption("Resultados obtenidos (actualizados con las ejecuciones recientes del laboratorio o valores base de referencia).")
 
     comp_cols = st.columns(3)
     with comp_cols[0]:
-        render_info_card("Enfoque Clásico", f"{classical['accuracy']:.1%} Acc", f"Baseline Random Forest\n\nF1-Score: {classical['f1_score']:.1%}")
+        render_info_card("Enfoque Clásico", f"{classical['accuracy'] * 100:.2f}% Acc", f"Baseline Random Forest\n\nF1-Score: {classical['f1_score'] * 100:.2f}%")
     with comp_cols[1]:
-        render_info_card("Enfoque QSVM", f"{quantum['accuracy']:.1%} Acc", f"Fidelity Quantum Kernel ({selected_qubits}q)\n\nF1-Score: {quantum['f1_score']:.1%}")
+        render_info_card("Enfoque QSVM", f"{quantum['accuracy'] * 100:.2f}% Acc", f"Fidelity Quantum Kernel ({selected_qubits}q)\n\nF1-Score: {quantum['f1_score'] * 100:.2f}%")
     with comp_cols[2]:
-        render_info_card("Hardware Físico RMN", f"{hardware['accuracy']:.1%} Acc", f"Validación en SpinQ\n\nF1-Score: {hardware['f1_score']:.1%}")
+        render_info_card("Hardware Físico RMN", f"{hardware['accuracy'] * 100:.2f}% Acc", f"Validación en SpinQ\n\nF1-Score: {hardware['f1_score'] * 100:.2f}%")
 
     st.write("")
     

@@ -13,8 +13,7 @@ SectionName = Literal[
     "1. Resumen",
     "2. Experimentar",
     "3. Live",
-    "4. Analisis",
-    "5. Conclusiones",
+    "4. Análisis y Síntesis",
 ]
 
 

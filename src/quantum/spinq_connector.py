@@ -8,8 +8,8 @@ from spinqit import H, CX
 if not hasattr(np, 'msort'):
     np.msort = lambda a: np.sort(a, axis=0)
 
-SPINQ_IP = "192.168.172.250"  
-SPINQ_PORT = 50177         
+SPINQ_IP = "192.168.172.217"  
+SPINQ_PORT = 63873         
 USUARIO = "holik"         
 CONTRASENA = "holikspinq"
 
