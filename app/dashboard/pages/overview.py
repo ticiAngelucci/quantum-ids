@@ -3,191 +3,206 @@ from __future__ import annotations
 import streamlit as st
 
 from dashboard.analytics import build_quantum_runs_dataframe, make_confusion_chart, make_global_comparison_chart
-from dashboard.pages.demo import render_demo_panel
 from dashboard.types import ModelData
 from dashboard.ui import render_info_card, render_metric_card, render_spotlight_panel, section_header
 
 
-def _build_active_model_summary(model_data: ModelData, selected_model: str) -> tuple[str, str]:
-    if selected_model == "Modelo clasico":
-        return (
-            "Modelo clasico",
-            "Baseline Random Forest entrenado sobre datos tabulares. Hoy funciona como referencia principal por estabilidad, velocidad e interpretabilidad.",
-        )
-
-    if model_data["Modelo cuantico"].get("selected_dataset_source") == "live":
-        return (
-            "Modelo cuantico · Live simulador",
-            "Corrida cuantica sobre trafico capturado en laboratorio y resumido por ventanas. Es el escenario experimental mas cercano al uso real.",
-        )
-
-    return (
-        "Modelo cuantico · CICIDS2017",
-        "Corrida cuantica sobre el dataset de referencia CICIDS2017. Sirve como entorno controlado antes de pasar al laboratorio live.",
-    )
-
-
 def render_overview_tab(model_data: ModelData, selected_model: str) -> None:
-    section_header(
-        "Resumen",
-        "Panel principal para leer estado del experimento, metricas y comparaciones sin recorrer toda la aplicacion.",
+    # --- HEADER PRINCIPAL ---
+    st.markdown(
+        """
+        <div style="padding: 0.5rem 0 1.5rem 0; border-bottom: 2px solid #FDB913; margin-bottom: 2rem;">
+            <span style="color: #FDB913; font-weight: 800; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em;">Tesina de Licenciatura en Sistemas</span>
+            <h1 style="margin: 0.3rem 0; font-size: 2.6rem; color: #FFFFFF; font-weight: 900;">Quantum IDS</h1>
+            <p style="color: #A0B3C6; margin: 0; font-size: 1.1rem; line-height: 1.5;">
+                Plataforma de investigación que contrasta los sistemas de detección de intrusiones en redes (IDS) 
+                basados en <b>computación clásica (Random Forest)</b> frente a arquitecturas de <b>Machine Learning Cuántico (QSVM)</b>. 
+                La hipótesis central busca demostrar cómo la proyección de datos a espacios de Hilbert permite resolver problemas 
+                complejos de ciberseguridad, explotando la naturaleza probabilística de la computación cuántica.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
-    active_title, active_copy = _build_active_model_summary(model_data, selected_model)
-    model = model_data[selected_model]
+    # --- SECCIÓN: LA HIPÓTESIS Y LA DIFERENCIA CLAVE ---
+    st.markdown("### 🔬 Hipótesis y Diferencia de Paradigmas")
+    st.caption("El fundamento técnico que separa ambos enfoques de procesamiento.")
+    
+    col_h1, col_h2 = st.columns(2)
+    
+    with col_h1:
+        st.markdown(
+            """
+            <div style="background: rgba(10, 30, 64, 0.85); border: 1px solid rgba(253, 185, 19, 0.3); border-radius: 14px; padding: 1.5rem; height: 100%;">
+                <span style="color: #FDB913; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em;">💻 Enfoque Tradicional (Clásico)</span>
+                <h3 style="color: #FFFFFF; font-size: 1.3rem; margin: 0.4rem 0 0.8rem 0;">Determinista & Tabular</h3>
+                <p style="color: #C8D6E5; font-size: 0.95rem; line-height: 1.5; margin: 0;">
+                    La computación clásica procesa los flujos de red evaluando variables de manera secuencial o mediante árboles de decisión (como Random Forest). Cada regla o nodo toma decisiones deterministas o basadas en frecuencias fijas sobre atributos estáticos.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        
+    with col_h2:
+        st.markdown(
+            """
+            <div style="background: rgba(10, 30, 64, 0.85); border: 1px solid rgba(253, 185, 19, 0.3); border-radius: 14px; padding: 1.5rem; height: 100%;">
+                <span style="color: #FDB913; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em;">⚛️ Enfoque Cuántico (QSVM / RMN)</span>
+                <h3 style="color: #FFFFFF; font-size: 1.3rem; margin: 0.4rem 0 0.8rem 0;">Probabilístico & Amplitudes</h3>
+                <p style="color: #C8D6E5; font-size: 0.95rem; line-height: 1.5; margin: 0;">
+                    A diferencia de medir una sola vez y descartar, <b>la computación cuántica explota superposiciones y entrelazamiento</b>: el circuito se ejecuta múltiples veces (shots) para extraer una <b>distribución de probabilidades y calcular un valor promedio</b>. Esto captura correlaciones ocultas que el método clásico pasa por alto.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.write("")
+    st.markdown("---")
+
+    # --- SECCIÓN: EJES DE COMPARACIÓN DIRECTA ---
+    st.markdown("### ⚖️ Ejes de Comparación")
+    st.caption("Qué se está contrastando analíticamente a lo largo de la investigación.")
+    
+    col_p1, col_p2, col_p3 = st.columns(3)
+    
+    with col_p1:
+        st.markdown(
+            """
+            <div style="background: rgba(10, 30, 64, 0.85); border: 1px solid rgba(253, 185, 19, 0.3); border-radius: 14px; padding: 1.4rem; height: 100%;">
+                <span style="color: #FDB913; font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em;">Contraste 01</span>
+                <h4 style="color: #FFFFFF; font-size: 1.15rem; margin: 0.3rem 0 0.6rem 0;">Modelos: Clásico vs. Cuántico</h4>
+                <p style="color: #C8D6E5; font-size: 0.9rem; line-height: 1.45; margin: 0;">
+                    <b>Se compara:</b> El rendimiento de un clasificador tabular tradicional (<b>Random Forest</b>) frente al clasificador de Kernel Cuántico (<b>QSVM</b>), evaluando cuál detecta mejor las anomalías de red bajo las mismas métricas.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        
+    with col_p2:
+        st.markdown(
+            """
+            <div style="background: rgba(10, 30, 64, 0.85); border: 1px solid rgba(253, 185, 19, 0.3); border-radius: 14px; padding: 1.4rem; height: 100%;">
+                <span style="color: #FDB913; font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em;">Contraste 02</span>
+                <h4 style="color: #FFFFFF; font-size: 1.15rem; margin: 0.3rem 0 0.6rem 0;">Entornos: Dataset vs. Live</h4>
+                <p style="color: #C8D6E5; font-size: 0.9rem; line-height: 1.45; margin: 0;">
+                    <b>Se compara:</b> La estabilidad de los modelos al operar sobre un entorno estático de referencia (<b>CICIDS2017</b>) frente a un escenario dinámico con <b>captura de tráfico en tiempo real por ventanas</b>.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        
+    with col_p3:
+        st.markdown(
+            """
+            <div style="background: rgba(10, 30, 64, 0.85); border: 1px solid rgba(253, 185, 19, 0.3); border-radius: 14px; padding: 1.4rem; height: 100%;">
+                <span style="color: #FDB913; font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em;">Contraste 03</span>
+                <h4 style="color: #FFFFFF; font-size: 1.15rem; margin: 0.3rem 0 0.6rem 0;">Infraestructura: Simulación vs. Física</h4>
+                <p style="color: #C8D6E5; font-size: 0.9rem; line-height: 1.45; margin: 0;">
+                    <b>Se compara:</b> El comportamiento de los circuitos ideales ejecutados en un <b>simulador local</b> frente al impacto del ruido real en el <b>hardware físico de Resonancia Magnética Nuclear (SpinQ)</b>.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.write("")
+    st.markdown("---")
+
+    # --- DATOS RÁPIDOS Y COMPARATIVA CLAVE ---
     classical = model_data["Modelo clasico"]
     quantum = model_data["Modelo cuantico"]
     hardware = model_data["Hardware cuantico real"]
-    leader = classical if classical["accuracy"] >= quantum["accuracy"] else quantum
-    accuracy_gap = abs(classical["accuracy"] - quantum["accuracy"])
-    f1_gap = abs(classical["f1_score"] - quantum["f1_score"])
+    
     selected_dataset_source = model_data["Modelo cuantico"].get("selected_dataset_source", "cicids")
     selected_qubits = model_data["Modelo cuantico"]["selected_qubits"]
-    execution_target = st.session_state.get("selected_quantum_execution_target", "simulator")
-    platform_label = "IBM validate" if execution_target == "ibm_validate" else "Simulador local"
-    dataset_label = "Live simulador" if selected_dataset_source == "live" else "CICIDS2017"
-    runs_df = build_quantum_runs_dataframe(dataset_source=selected_dataset_source)
-    trained_runs = runs_df[runs_df["Estado"] == "Entrenado"]
-    latest_run = "Sin corrida guardada"
-    if not trained_runs.empty:
-        latest = trained_runs.sort_values(["Qubits"], ascending=False).iloc[0]
-        latest_run = f"{int(latest['Qubits'])}q · {latest['Fuente']} · F1 {latest['F1-Score']:.2%}"
+    
+    st.markdown("### ⚖️ Rendimiento")
+    st.caption("Resultados obtenidos al contrastar ambas metodologías en la consola.")
 
-    row1_left, row1_right = st.columns([1.35, 1])
-    with row1_left:
-        render_spotlight_panel(
-            "Estado del experimento",
-            active_title,
-            "Vista tecnica del experimento activo. Este bloque resume la corrida actual y permite identificar rapidamente la configuracion visible.",
-            meta=[
-                ("Dataset", dataset_label),
-                ("Plataforma", platform_label),
-                ("Qubits", str(selected_qubits)),
-            ],
-        )
-    with row1_right:
-        render_info_card("Modelo", model["short_label"], active_copy)
-        st.write("")
-        render_info_card("Optimizer", "COBYLA", f"Estado visible: {model['source_label']}. Tiempo de referencia: {model['execution_time']:.2f}s.")
-        st.write("")
-        render_info_card("Ultima corrida", latest_run, "La consola prioriza la ultima evidencia guardada para esta fuente cuantica.")
-
-    kpi_cols = st.columns(4)
-    with kpi_cols[0]:
-        render_metric_card("Accuracy", model["accuracy"], "Resultado principal del experimento activo")
-    with kpi_cols[1]:
-        render_metric_card("Precision", model["precision"], "Confiabilidad de las alertas")
-    with kpi_cols[2]:
-        render_metric_card("Recall", model["recall"], "Ataques reales detectados")
-    with kpi_cols[3]:
-        render_metric_card("F1-Score", model["f1_score"], "Equilibrio general")
+    comp_cols = st.columns(3)
+    with comp_cols[0]:
+        render_info_card("Enfoque Clásico", f"{classical['accuracy']:.1%} Acc", f"Baseline Random Forest\n\nF1-Score: {classical['f1_score']:.1%}")
+    with comp_cols[1]:
+        render_info_card("Enfoque QSVM", f"{quantum['accuracy']:.1%} Acc", f"Fidelity Quantum Kernel ({selected_qubits}q)\n\nF1-Score: {quantum['f1_score']:.1%}")
+    with comp_cols[2]:
+        render_info_card("Hardware Físico RMN", f"{hardware['accuracy']:.1%} Acc", f"Validación en SpinQ\n\nF1-Score: {hardware['f1_score']:.1%}")
 
     st.write("")
-    compare_left, compare_right = st.columns([1.1, 1])
-    with compare_left:
-        render_spotlight_panel(
-            "Comparacion inmediata",
-            f"{classical['short_label']} vs {quantum['short_label']}",
-            "Comparacion directa entre baseline clasico y corrida cuantica visible. Sirve para responder rapido quien lidera y cuanta distancia queda por cerrar.",
-            meta=[
-                ("Lider actual", leader["short_label"]),
-                ("Brecha acc", f"{accuracy_gap:.1%}"),
-                ("Brecha F1", f"{f1_gap:.1%}"),
-            ],
-        )
-    with compare_right:
-        render_info_card("Clasico", f"{classical['accuracy']:.1%} acc", f"F1 {classical['f1_score']:.1%} · {classical['source_label']}")
-        st.write("")
-        render_info_card("Cuantico", f"{quantum['accuracy']:.1%} acc", f"F1 {quantum['f1_score']:.1%} · {quantum.get('dataset_source_label', 'CICIDS2017')}")
-        st.write("")
-        render_info_card("Hardware real", f"{hardware['accuracy']:.1%} acc", f"F1 {hardware['f1_score']:.1%} · {hardware['source_label']}")
-
-    if model_data["Modelo cuantico"]["source"] != "real":
-        quantum_command = (
-            f"python -m src.quantum.train_vqc_simulator --dataset-source live --qubits {selected_qubits}"
-            if selected_dataset_source == "live"
-            else f"python -m src.quantum.train_vqc_simulator --qubits {selected_qubits}"
-        )
-        st.warning(
-            f"Todavia no hay una corrida cuantica disponible para {model_data['Modelo cuantico'].get('dataset_source_label', 'CICIDS2017')} "
-            f"con {selected_qubits} qubits. Ejecutar: {quantum_command}"
-        )
+    
+    # --- SECCIÓN EXPLICATIVA DE LA GRÁFICA ---
+    st.markdown(
+        """
+        <div style="background: rgba(10, 30, 64, 0.6); border-left: 4px solid #FDB913; padding: 0.9rem 1.2rem; border-radius: 0 8px 8px 0; margin-bottom: 1rem;">
+            <p style="color: #E2E8F0; font-size: 0.92rem; margin: 0; line-height: 1.4;">
+                <b>💡 Guía de lectura:</b> Cada bloque vertical agrupa las métricas de evaluación (Accuracy, Precision, Recall y F1-Score). 
+                Permite contrastar visualmente la diferencia de rendimiento entre el modelo tabular tradicional, el simulador cuántico ideal 
+                y el desgaste de rendimiento provocado por el ruido térmico en el equipo físico de RMN (SpinQ).
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    
+    st.plotly_chart(make_global_comparison_chart(model_data), width="stretch", key="landing_global_comparison_chart")
 
     st.write("")
-    st.markdown("#### Comparacion global")
-    st.plotly_chart(make_global_comparison_chart(model_data), width="stretch", key="overview_global_comparison_chart")
+    st.markdown("---")
 
-    st.write("")
-    st.markdown("#### Resultados por qubits")
-    qubit_cols = st.columns(min(4, len(runs_df)))
-    for col, (_, row) in zip(qubit_cols, runs_df.iterrows()):
-        with col:
-            if row["Estado"] == "Entrenado":
-                render_info_card(
-                    f"{int(row['Qubits'])}q",
-                    f"{row['Accuracy']:.1%} acc",
-                    f"F1 {row['F1-Score']:.1%} · {row['Tiempo (s)']:.1f}s · {row['Estado']}",
-                )
-            else:
-                render_info_card(
-                    f"{int(row['Qubits'])}q",
-                    "Pendiente",
-                    "Todavia no existe un JSON guardado para esta configuracion.",
-                )
+    # --- SECCIÓN: GLOSARIO TÉCNICO DE MÉTRICAS ---
+    st.markdown("### 📚 ¿Qué significan las métricas evaluadas?")
+    st.caption("Desglose conceptual de los indicadores utilizados en la consola para medir el éxito del IDS.")
 
-    st.write("")
-    matrix_left, matrix_right = st.columns([1.35, 0.95])
-    with matrix_left:
-        st.markdown("#### Matriz de confusion")
-        st.plotly_chart(
-            make_confusion_chart(model["confusion_matrix"], height=320),
-            width="stretch",
-            key=f"overview_confusion_chart_{selected_model}",
+    m_col1, m_col2 = st.columns(2)
+    with m_col1:
+        st.markdown(
+            """
+            <div style="background: rgba(10, 30, 64, 0.85); border: 1px solid rgba(253, 185, 19, 0.2); border-radius: 12px; padding: 1.2rem; margin-bottom: 1rem;">
+                <h5 style="color: #FDB913; margin: 0 0 0.3rem 0;">🎯 Accuracy (Precisión Global)</h5>
+                <p style="color: #C8D6E5; font-size: 0.9rem; margin: 0; line-height: 1.4;">
+                    Porcentaje total de decisiones acertadas (tanto tráfico normal como ataques bien clasificados) sobre el total de muestras analizadas.
+                </p>
+            </div>
+            <div style="background: rgba(10, 30, 64, 0.85); border: 1px solid rgba(253, 185, 19, 0.2); border-radius: 12px; padding: 1.2rem;">
+                <h5 style="color: #FDB913; margin: 0 0 0.3rem 0;">🛡️ Precision (Confiabilidad de Alertas)</h5>
+                <p style="color: #C8D6E5; font-size: 0.9rem; margin: 0; line-height: 1.4;">
+                    Indica qué tan seguro es que un evento marcado como "ataque" lo sea realmente. Evita los falsos positivos (alertas falsas a los analistas).
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
-    with matrix_right:
-        render_spotlight_panel(
-            "Lectura tecnica",
-            active_title,
-            active_copy,
-            meta=[
-                ("Metricas", model["source_label"]),
-                ("Tiempo", f"{model['execution_time']:.2f}s"),
-                ("Estado", model["short_label"]),
-            ],
-        )
-
-    st.write("")
-    with st.expander("Configuracion experimental y detalles tecnicos", expanded=False):
-        cfg_cols = st.columns(3)
-        with cfg_cols[0]:
-            render_info_card("Dataset", dataset_label, "Fuente de datos usada por la corrida cuantica visible.")
-        with cfg_cols[1]:
-            render_info_card("Plataforma", platform_label, "Entorno donde se ejecuta la corrida cuantica actual.")
-        with cfg_cols[2]:
-            render_info_card("Qubits", str(selected_qubits), "Cantidad de qubits actualmente visible en la consola.")
-        st.write("")
-        render_info_card("Modelo activo", model["short_label"], model["description"])
-
-    with st.expander("Contexto de investigacion", expanded=False):
-        render_spotlight_panel(
-            "Pregunta de investigacion",
-            "¿Puede Quantum Machine Learning detectar anomalias de red de forma competitiva frente a un baseline clasico?",
-            "La consola compara un baseline Random Forest con un VQC experimental. La lectura correcta no es solo mirar accuracy: tambien importa precision, recall, F1, costo temporal y estabilidad entre simulacion y hardware real.",
-            meta=[
-                ("Lider actual", leader["short_label"]),
-                ("Brecha acc", f"{accuracy_gap:.1%}"),
-                ("Brecha F1", f"{f1_gap:.1%}"),
-            ],
+    with m_col2:
+        st.markdown(
+            """
+            <div style="background: rgba(10, 30, 64, 0.85); border: 1px solid rgba(253, 185, 19, 0.2); border-radius: 12px; padding: 1.2rem; margin-bottom: 1rem;">
+                <h5 style="color: #FDB913; margin: 0 0 0.3rem 0;">🔍 Recall (Tasa de Detección)</h5>
+                <p style="color: #C8D6E5; font-size: 0.9rem; margin: 0; line-height: 1.4;">
+                    Mide la capacidad del modelo para encontrar y atrapar todos los ataques reales que ocurrieron, evitando que amenazas pasen desapercibidas (falsos negativos).
+                </p>
+            </div>
+            <div style="background: rgba(10, 30, 64, 0.85); border: 1px solid rgba(253, 185, 19, 0.2); border-radius: 12px; padding: 1.2rem;">
+                <h5 style="color: #FDB913; margin: 0 0 0.3rem 0;">⚖️ F1-Score (Equilibrio General)</h5>
+                <p style="color: #C8D6E5; font-size: 0.9rem; margin: 0; line-height: 1.4;">
+                    Es la <b>media armónica entre Precision y Recall</b>. Es la métrica clave en ciberseguridad porque resume en un solo valor si el modelo detecta bien los ataques sin generar falsas alarmas.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
-    with st.expander("Acerca del proyecto", expanded=False):
-        info_cols = st.columns(3)
-        with info_cols[0]:
-            render_info_card("Clasico", "Baseline", "Random Forest entrenado con datos tabulares.")
-        with info_cols[1]:
-            render_info_card("Cuantico", "VQC", "Clasificador variacional de Qiskit usado como linea experimental.")
-        with info_cols[2]:
-            render_info_card("IBM validate", "Hardware", "Validacion corta en hardware real con entrenamiento local.")
-
-    with st.expander("Demo rapida de lectura", expanded=False):
-        render_demo_panel(selected_model)
+    # --- FOOTER ACADÉMICO ---
+    st.markdown("---")
+    st.markdown(
+        """
+        <div style="text-align: center; padding: 1.5rem 0; color: #A0B3C6; font-size: 0.9rem;">
+            <p style="margin: 0; color: #FFFFFF; font-weight: 700;">Quantum IDS · Tesina de Licenciatura en Sistemas</p>
+            <p style="margin: 0.3rem 0 0 0;">Autor: <b>Ticiana Angelucci</b> | Universidad Champagnat | 2026</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )

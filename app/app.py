@@ -41,7 +41,6 @@ def main() -> None:
         selected_quantum_dataset_source=selected_quantum_dataset_source,
     )
 
-    render_header(model_data)
     selection: SidebarSelection = render_sidebar_controls(
         model_data,
         selected_quantum_qubits,
