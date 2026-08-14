@@ -123,6 +123,12 @@ def load_quantum_hardware_results(
         results_path = QUANTUM_LIVE_HARDWARE_RESULTS_PATH if dataset_source == "live" else QUANTUM_HARDWARE_RESULTS_PATH
     else:
         results_path = get_quantum_hardware_results_path(qubits, dataset_source=dataset_source)
+        if not results_path.exists():
+            results_path = (
+                QUANTUM_LIVE_HARDWARE_RESULTS_PATH
+                if dataset_source == "live"
+                else QUANTUM_HARDWARE_RESULTS_PATH
+            )
     if not results_path.exists():
         return None
     with open(results_path, "r", encoding="utf-8") as results_file:
@@ -132,6 +138,11 @@ def load_quantum_hardware_results(
     confusion = payload.get("confusion_matrix")
     if not metrics or confusion is None:
         return None
+    payload_qubits = payload.get("num_qubits")
+    if qubits is not None and payload_qubits is not None and payload_qubits != qubits:
+        return None
+
+    execution_target = payload.get("execution_target", "ibm")
 
     return {
         "accuracy": float(metrics["accuracy"]),
@@ -139,7 +150,12 @@ def load_quantum_hardware_results(
         "recall": float(metrics["recall"]),
         "f1_score": float(metrics["f1_score"]),
         "confusion_matrix": np.array(confusion),
-        "model_name": payload.get("model_name", "Variational Quantum Classifier"),
+        "model_name": payload.get(
+            "model_name",
+            "Quantum Kernel (QSVM)"
+            if execution_target == "spinq"
+            else "Variational Quantum Classifier",
+        ),
         "pca_components": payload.get("pca_components"),
         "num_qubits": payload.get("num_qubits"),
         "sample_size": payload.get("sample_size"),
@@ -154,6 +170,8 @@ def load_quantum_hardware_results(
         "validation_strategy": payload.get("validation_strategy"),
         "local_reference_metrics_subset": payload.get("local_reference_metrics_subset", {}),
         "local_reference_metrics_full": payload.get("local_reference_metrics_full", {}),
+        "execution_target": execution_target,
+        "quantum_noise": payload.get("quantum_noise"),
     }
 
 
@@ -249,6 +267,11 @@ def get_model_data(
         dataset_source=selected_quantum_dataset_source,
     )
     if hardware_results is not None:
+        hardware_platform = (
+            "SpinQ Triangulum"
+            if hardware_results.get("execution_target") == "spinq"
+            else f"IBM Quantum backend {hardware_results.get('ibm_backend_name') or 'desconocido'}"
+        )
         model_data["Hardware cuantico real"].update(
             {
                 "accuracy": hardware_results["accuracy"],
@@ -259,7 +282,7 @@ def get_model_data(
                 "source": "real",
                 "source_label": "Resultado real",
                 "description": (
-                    f"IBM Quantum backend {hardware_results.get('ibm_backend_name') or 'desconocido'} "
+                    f"{hardware_platform} "
                     f"cargado desde {hardware_results['results_path']}."
                 ),
                 "trained_model_name": hardware_results["model_name"],
@@ -274,6 +297,8 @@ def get_model_data(
                 "ibm_backend_name": hardware_results.get("ibm_backend_name"),
                 "hardware_diagnostics": hardware_results.get("hardware_diagnostics", {}),
                 "hardware_gap_vs_simulator": hardware_results.get("hardware_gap_vs_simulator", {}),
+                "execution_target": hardware_results.get("execution_target"),
+                "quantum_noise": hardware_results.get("quantum_noise"),
                 "execution_time": hardware_results["execution_time_seconds"]
                 if hardware_results["execution_time_seconds"] is not None
                 else model_data["Hardware cuantico real"]["execution_time"],

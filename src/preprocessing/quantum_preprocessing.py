@@ -32,6 +32,31 @@ class QuantumDatasetBundle:
     live_proxy_baseline_metrics: dict | None = None
 
 
+def select_balanced_quantum_subset(
+    features: np.ndarray,
+    labels: np.ndarray,
+    samples_per_class: int = 2,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Selecciona una cohorte binaria, balanceada y reproducible."""
+    features = np.asarray(features)
+    labels = np.asarray(labels)
+    classes = np.unique(labels)
+    if len(classes) != 2:
+        raise ValueError("La evaluación QSVM requiere exactamente dos clases.")
+
+    selected_indices: list[int] = []
+    for class_label in classes:
+        class_indices = np.flatnonzero(labels == class_label)
+        if len(class_indices) < samples_per_class:
+            raise ValueError(
+                f"La clase {class_label} necesita al menos "
+                f"{samples_per_class} muestras."
+            )
+        selected_indices.extend(class_indices[:samples_per_class].tolist())
+
+    return features[selected_indices], labels[selected_indices]
+
+
 def load_and_clean_dataset(dataset_path: Path) -> pd.DataFrame:
     df = pd.read_csv(dataset_path)
     df.columns = [str(col).strip() for col in df.columns]

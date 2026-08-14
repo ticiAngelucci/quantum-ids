@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -10,9 +11,29 @@ from dashboard.analytics import (
     inspect_live_quantum_dataset,
     make_confusion_chart,
 )
-from dashboard.constants import LIVE_CAPTURE_PATH, LIVE_TRAINING_DATASET_PATH
+from dashboard.constants import (
+    LIVE_CAPTURE_PATH,
+    LIVE_TRAINING_DATASET_PATH,
+    QUANTUM_LIVE_HARDWARE_RESULTS_PATH,
+)
 from dashboard.types import ModelData
-from dashboard.ui import render_info_card
+from dashboard.ui import render_info_card, render_quantum_noise_card
+from src.utils.save_results import save_results
+
+
+def _load_saved_spinq_result(path) -> dict | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if (
+        payload.get("execution_target") != "spinq"
+        or payload.get("pipeline_version") != "qsvm_fidelity_v2"
+        or not isinstance(payload.get("metrics"), dict)
+        or payload.get("confusion_matrix") is None
+    ):
+        return None
+    return payload
 
 
 SIMULATOR_CONFIGS = {
@@ -154,7 +175,6 @@ def _render_live_monitoring(selected_quantum_qubits: int) -> None:
                 "Segundos por ventana",
                 min_value=1,
                 max_value=60,
-                value=int(st.session_state.get("live_monitor_duration", preset_config["duration"])),
                 step=1,
                 key="live_monitor_duration",
             )
@@ -163,7 +183,6 @@ def _render_live_monitoring(selected_quantum_qubits: int) -> None:
                 "Cantidad de ventanas",
                 min_value=1,
                 max_value=200,
-                value=int(st.session_state.get("live_monitor_windows", preset_config["windows"])),
                 step=1,
                 key="live_monitor_windows",
             )
@@ -355,6 +374,16 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
             label_visibility="collapsed",
             on_change=_sync_live_spinq_qubits,
         )
+
+        if (
+            live_execution_target == "spinq"
+            and "spinq_live_results" not in st.session_state
+        ):
+            saved_spinq_result = _load_saved_spinq_result(
+                QUANTUM_LIVE_HARDWARE_RESULTS_PATH
+            )
+            if saved_spinq_result:
+                st.session_state["spinq_live_results"] = saved_spinq_result
         if live_execution_target == "spinq":
             selected_quantum_qubits = 3
 
@@ -374,7 +403,7 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
         )
         run_live_action = st.button(
             (
-                "Ejecutar QSVM Live en SpinQ (7 circuitos)"
+                "Ejecutar QSVM Live en SpinQ (26 circuitos)"
                 if live_execution_target == "spinq"
                 else (
                     f"Prevalidar QSVM Live para IBM ({selected_quantum_qubits}q)"
@@ -392,7 +421,7 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
 
     with execute_right:
         target_description = (
-            "Piloto físico de 7 circuitos y 3 qubits."
+            "Evaluación física balanceada de 26 circuitos y 3 qubits."
             if live_execution_target == "spinq"
             else (
                 f"Prevalidación local para IBM, limitada a 16 muestras ({selected_quantum_qubits}q)."
@@ -489,11 +518,14 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
             st.session_state.pop("spinq_live_results", None)
             spinq_status_placeholder = st.empty()
             spinq_status_placeholder.info(
-                "Circuitos completados: 0 de 7 | "
-                "Conectando con SpinQ Triangulum..."
+                "Preparando y prevalidando la cohorte balanceada..."
             )
             try:
-                from src.preprocessing.quantum_preprocessing import prepare_quantum_dataset
+                from src.preprocessing.quantum_preprocessing import (
+                    prepare_quantum_dataset,
+                    select_balanced_quantum_subset,
+                )
+                from src.quantum.qsvm_feature_map import build_qiskit_qsvm_feature_map
                 from src.quantum.spinq_connector import connect_to_spinq
                 from spinqit import get_compiler, Circuit, H, CX
                 try:
@@ -513,30 +545,41 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
                     dataset_source="live"
                 )
                 
-                def select_balanced_pair(features, labels):
-                    labels = np.asarray(labels)
-                    classes = np.unique(labels)
-                    if len(classes) < 2:
-                        raise ValueError(
-                            "El QSVM Live necesita muestras de ambas clases."
-                        )
-                    indices = [
-                        int(np.flatnonzero(labels == class_label)[0])
-                        for class_label in classes[:2]
-                    ]
-                    return np.asarray(features)[indices], labels[indices]
-
-                X_train, y_train = select_balanced_pair(
+                X_train, y_train = select_balanced_quantum_subset(
                     bundle.X_train,
                     bundle.y_train,
+                    samples_per_class=2,
                 )
-                X_test, y_test = select_balanced_pair(
+                X_test, y_test = select_balanced_quantum_subset(
                     bundle.X_test,
                     bundle.y_test,
+                    samples_per_class=2,
                 )
+
+                from qiskit_machine_learning.kernels import FidelityQuantumKernel
+
+                preflight_kernel = FidelityQuantumKernel(
+                    feature_map=build_qiskit_qsvm_feature_map(3)
+                )
+                preflight_train = preflight_kernel.evaluate(X_train)
+                preflight_test = preflight_kernel.evaluate(X_test, y_vec=X_train)
+                preflight_model = SVC(
+                    kernel="precomputed",
+                    class_weight="balanced",
+                )
+                preflight_model.fit(preflight_train, y_train)
+                preflight_prediction = preflight_model.predict(preflight_test)
+                if not np.any(
+                    (np.asarray(y_test) == 1) & (preflight_prediction == 1)
+                ):
+                    raise RuntimeError(
+                        "La prevalidación local no separó ambas clases. "
+                        "La ejecución física fue cancelada para no gastar "
+                        "26 circuitos en una cohorte no informativa."
+                    )
                 
                 engine, config = connect_to_spinq(task_name=f"live_spinq_{int(time.time())}")
-                if not engine or not config:
+                if engine is None or config is None:
                     raise RuntimeError("No se pudo establecer conexión con el servidor SpinQ.")
                 
                 comp = get_compiler("native")
@@ -549,10 +592,23 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
                         circuit << (H, qubits[q_idx])
                         circuit << (Rz, qubits[q_idx], float(x_a[q_idx]))
 
-                    circuit << (CX, (qubits[0], qubits[1]))
-                    circuit << (CX, (qubits[1], qubits[2]))
-                    circuit << (CX, (qubits[1], qubits[2]))
-                    circuit << (CX, (qubits[0], qubits[1]))
+                    for control, target in ((0, 1), (1, 2)):
+                        circuit << (CX, (qubits[control], qubits[target]))
+                        circuit << (
+                            Rz,
+                            qubits[target],
+                            2.0 * float(x_a[control]) * float(x_a[target]),
+                        )
+                        circuit << (CX, (qubits[control], qubits[target]))
+
+                    for control, target in ((1, 2), (0, 1)):
+                        circuit << (CX, (qubits[control], qubits[target]))
+                        circuit << (
+                            Rz,
+                            qubits[target],
+                            -2.0 * float(x_b[control]) * float(x_b[target]),
+                        )
+                        circuit << (CX, (qubits[control], qubits[target]))
 
                     for q_idx in range(3):
                         circuit << (Rz, qubits[q_idx], -float(x_b[q_idx]))
@@ -583,20 +639,23 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
                     )
                     return float(zero_hits) / float(shots)
 
-                train_kernel = np.zeros((2, 2), dtype=float)
+                train_size = len(X_train)
+                test_size = len(X_test)
+                circuit_total = train_size * (train_size + 1) // 2 + test_size * train_size
+                train_kernel = np.zeros((train_size, train_size), dtype=float)
                 operation = 0
                 spinq_progress = st.progress(0)
-                for i in range(2):
-                    for j in range(i, 2):
+                for i in range(train_size):
+                    for j in range(i, train_size):
                         operation += 1
                         spinq_status_placeholder.info(
-                            f"Ejecutando circuito {operation} de 7 | "
+                            f"Ejecutando circuito {operation} de {circuit_total} | "
                             f"Completados: {operation - 1} | "
                             f"Entrenamiento ({i + 1},{j + 1})"
                         )
                         spinq_progress.progress(
-                            operation / 7,
-                            text=f"Progreso total: {operation}/7 circuitos",
+                            operation / circuit_total,
+                            text=f"Progreso total: {operation}/{circuit_total} circuitos",
                         )
                         time.sleep(0.15)
                         fidelity = evaluate_fidelity(
@@ -604,24 +663,24 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
                             X_train[j],
                         )
                         spinq_status_placeholder.info(
-                            f"Circuito {operation} de 7 completado | "
+                            f"Circuito {operation} de {circuit_total} completado | "
                             f"Entrenamiento ({i + 1},{j + 1})"
                         )
                         train_kernel[i, j] = fidelity
                         train_kernel[j, i] = fidelity
 
-                test_kernel = np.zeros((2, 2), dtype=float)
-                for i in range(2):
-                    for j in range(2):
+                test_kernel = np.zeros((test_size, train_size), dtype=float)
+                for i in range(test_size):
+                    for j in range(train_size):
                         operation += 1
                         spinq_status_placeholder.info(
-                            f"Ejecutando circuito {operation} de 7 | "
+                            f"Ejecutando circuito {operation} de {circuit_total} | "
                             f"Completados: {operation - 1} | "
                             f"Prueba ({i + 1},{j + 1})"
                         )
                         spinq_progress.progress(
-                            operation / 7,
-                            text=f"Progreso total: {operation}/7 circuitos",
+                            operation / circuit_total,
+                            text=f"Progreso total: {operation}/{circuit_total} circuitos",
                         )
                         time.sleep(0.15)
                         test_kernel[i, j] = evaluate_fidelity(
@@ -629,20 +688,37 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
                             X_test[i],
                         )
                         spinq_status_placeholder.info(
-                            f"Circuito {operation} de 7 completado | "
+                            f"Circuito {operation} de {circuit_total} completado | "
                             f"Prueba ({i + 1},{j + 1})"
                         )
 
-                qsvm = SVC(kernel="precomputed")
+                qsvm = SVC(kernel="precomputed", class_weight="balanced")
                 qsvm.fit(train_kernel, y_train)
                 y_pred = qsvm.predict(test_kernel)
                 y_true = np.asarray(y_test)
+                kernel_deviations = np.concatenate(
+                    (
+                        np.abs(
+                            train_kernel
+                            - np.asarray(preflight_train, dtype=float)
+                        ).ravel(),
+                        np.abs(
+                            test_kernel
+                            - np.asarray(preflight_test, dtype=float)
+                        ).ravel(),
+                    )
+                )
+                quantum_noise = {
+                    "mean_absolute_deviation": float(np.mean(kernel_deviations)),
+                    "max_absolute_deviation": float(np.max(kernel_deviations)),
+                    "comparison_points": int(kernel_deviations.size),
+                }
                 spinq_status_placeholder.success(
-                    "7 de 7 circuitos completados. Entrenando la SVM..."
+                    f"{circuit_total} de {circuit_total} circuitos completados. Entrenando la SVM..."
                 )
                 spinq_progress.progress(
                     1.0,
-                    text="Completado: 7/7 circuitos",
+                    text=f"Completado: {circuit_total}/{circuit_total} circuitos",
                 )
                 
                 spinq_live_results = {
@@ -660,12 +736,24 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
                     "rows": len(y_pred),
                     "sample_size": len(y_pred),
                     "execution_target": "spinq",
-                    "pipeline_version": "qsvm_fidelity_v1",
+                    "pipeline_version": "qsvm_fidelity_v2",
+                    "num_qubits": 3,
+                    "dataset_source": "live",
                     "train_kernel_matrix": train_kernel.tolist(),
                     "test_kernel_matrix": test_kernel.tolist(),
+                    "quantum_noise": quantum_noise,
                 }
                 st.session_state["spinq_live_results"] = spinq_live_results
-                st.success("¡Validación física en SpinQ completada con éxito!")
+                try:
+                    save_results(
+                        spinq_live_results,
+                        QUANTUM_LIVE_HARDWARE_RESULTS_PATH,
+                    )
+                except OSError as persistence_error:
+                    st.session_state["spinq_live_persistence_warning"] = str(
+                        persistence_error
+                    )
+                st.rerun()
             except Exception as e:
                 spinq_status_placeholder.error(f"Error al ejecutar en la SpinQ: {e}")
 
@@ -677,7 +765,7 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
         live_execution_target == "spinq"
         and spinq_live_res
         and "metrics" in spinq_live_res
-        and spinq_live_res.get("pipeline_version") == "qsvm_fidelity_v1"
+        and spinq_live_res.get("pipeline_version") == "qsvm_fidelity_v2"
     ):
         st.markdown("<div style='margin-top: 2rem;'></div>", unsafe_allow_html=True)
         st.markdown("---")
@@ -691,6 +779,7 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
         sq_cols[1].metric("Precision", f"{spinq_metrics['precision'] * 100:.2f}%")
         sq_cols[2].metric("Recall", f"{spinq_metrics['recall'] * 100:.2f}%")
         sq_cols[3].metric("F1-Score", f"{spinq_metrics['f1_score'] * 100:.2f}%")
+        render_quantum_noise_card(spinq_live_res.get("quantum_noise"))
         st.markdown("#### Matriz de Confusión")
         st.plotly_chart(
             make_confusion_chart(np.array(spinq_live_res["confusion_matrix"]), height=280),

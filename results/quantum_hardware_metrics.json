@@ -1,0 +1,29 @@
+{
+    "metrics": {
+        "accuracy": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0
+    },
+    "confusion_matrix": [
+        [
+            2,
+            0
+        ],
+        [
+            0,
+            2
+        ]
+    ],
+    "sample_size": 4,
+    "rows": 4,
+    "execution_target": "spinq",
+    "pipeline_version": "qsvm_fidelity_v2",
+    "num_qubits": 3,
+    "dataset_source": "cicids",
+    "quantum_noise": {
+        "mean_absolute_deviation": 0.12943727825694398,
+        "max_absolute_deviation": 0.47949218749999956,
+        "comparison_points": 32
+    }
+}

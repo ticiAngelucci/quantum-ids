@@ -44,6 +44,34 @@ def render_metric_card(label: str, value: float, caption: str) -> None:
     st.caption(f"{caption} (Efectividad: {value:.4f})")
 
 
+def render_quantum_noise_card(noise_data: dict | None) -> None:
+    """Muestra la desviación del kernel físico respecto del kernel ideal."""
+    if noise_data:
+        mean_noise = float(noise_data.get("mean_absolute_deviation", 0.0))
+        max_noise = float(noise_data.get("max_absolute_deviation", 0.0))
+        value_html = f"{mean_noise * 100:.2f}%"
+        detail_html = f"Desviación máxima observada: <b>{max_noise * 100:.2f}%</b>."
+    else:
+        value_html = "Pendiente"
+        detail_html = "Se calculará al finalizar la próxima ejecución física completa."
+
+    st.markdown(
+        f"""
+        <div style="background: linear-gradient(135deg, rgba(10, 30, 64, 0.96), rgba(14, 42, 88, 0.96)); border: 1px solid rgba(253, 185, 19, 0.55); border-left: 5px solid #FDB913; border-radius: 14px; padding: 1.2rem 1.4rem; margin: 1rem 0 1.4rem 0;">
+            <div style="color: #FDB913; font-size: 0.76rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em;">Ruido cuántico estimado</div>
+            <div style="color: #FFFFFF; font-size: 2rem; font-weight: 900; margin: 0.15rem 0;">{value_html}</div>
+            <div style="color: #D9E4F2; font-size: 0.88rem;">{detail_html}</div>
+            <div style="color: #A0B3C6; font-size: 0.76rem; line-height: 1.45; margin-top: 0.65rem;">
+                El ruido cuántico son pequeñas alteraciones no deseadas que modifican el resultado ideal de un circuito.
+                Esta estimación compara el kernel ideal con el medido por SpinQ e incluye efectos del hardware,
+                variación estadística de los shots y diferencias de ejecución; no representa una tasa física pura del dispositivo.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_header(model_data: ModelData) -> None:
     selected_model = st.session_state.get("selected_model", "Modelo clasico")
     selected_qubits = st.session_state.get("selected_quantum_qubits", 4)
@@ -139,10 +167,18 @@ def render_sidebar_controls(
                 st.session_state["selected_quantum_qubits"] = 3
                 st.session_state["quantum_results_selectbox"] = 3
 
+            qubit_options = list(SUPPORTED_QUANTUM_QUBITS)
+            widget_qubits = st.session_state.get(
+                "quantum_results_selectbox",
+                selected_quantum_qubits,
+            )
+            if widget_qubits not in qubit_options:
+                widget_qubits = selected_quantum_qubits
+            st.session_state["quantum_results_selectbox"] = widget_qubits
+
             chosen_qubits = st.selectbox(
                 "Número de Qubits",
-                options=list(SUPPORTED_QUANTUM_QUBITS),
-                index=list(SUPPORTED_QUANTUM_QUBITS).index(selected_quantum_qubits),
+                options=qubit_options,
                 key="quantum_results_selectbox",
                 disabled=spinq_selected,
                 help=(

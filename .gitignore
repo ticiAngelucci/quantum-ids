@@ -4,7 +4,9 @@ __pycache__/
 .ipynb_checkpoints/
 .env
 data/
-results/
+results/*
+!results/quantum_hardware_metrics.json
+!results/quantum_live_hardware_metrics.json
 *.pcap
 01_attack-scrapy.py
 .venv/

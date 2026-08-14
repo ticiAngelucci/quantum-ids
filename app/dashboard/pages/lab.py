@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 import time
 import numpy as np
 import pandas as pd
@@ -6,9 +7,31 @@ import streamlit as st
 
 from dashboard.analytics import evaluate_classical_dataset, make_confusion_chart
 from dashboard.constants import (
-    CLASSICAL_MODEL_PATH, CLASSICAL_RESULTS_PATH, DATASET_PATH, PCA_PATH, SCALER_PATH
+    CLASSICAL_MODEL_PATH,
+    CLASSICAL_RESULTS_PATH,
+    DATASET_PATH,
+    PCA_PATH,
+    QUANTUM_HARDWARE_RESULTS_PATH,
+    SCALER_PATH,
 )
 from dashboard.types import ModelData, QuantumDatasetSource
+from dashboard.ui import render_quantum_noise_card
+from src.utils.save_results import save_results
+
+
+def _load_saved_spinq_result(path) -> dict | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if (
+        payload.get("execution_target") != "spinq"
+        or payload.get("pipeline_version") != "qsvm_fidelity_v2"
+        or not isinstance(payload.get("metrics"), dict)
+        or payload.get("confusion_matrix") is None
+    ):
+        return None
+    return payload
 
 
 def _sync_spinq_qubits() -> None:
@@ -60,6 +83,24 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
             on_change=_sync_spinq_qubits,
         )
 
+        if (
+            selected_quantum_execution_target == "spinq"
+            and "quantum_lab_results" not in st.session_state
+        ):
+            saved_spinq_result = _load_saved_spinq_result(
+                QUANTUM_HARDWARE_RESULTS_PATH
+            )
+            if (
+                saved_spinq_result
+                and saved_spinq_result.get("dataset_source")
+                == selected_quantum_dataset_source
+            ):
+                st.session_state["quantum_lab_results"] = saved_spinq_result
+                st.session_state["quantum_lab_results_qubits"] = 3
+                st.session_state[
+                    "quantum_lab_results_source"
+                ] = selected_quantum_dataset_source
+
         if selected_quantum_execution_target == "spinq":
             spinq_connectivity_only = st.checkbox(
                 "Prueba rápida de conexión (1 circuito)",
@@ -67,7 +108,7 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
                 help=(
                     "Ejecuta un único circuito de 3 qubits y muestra los counts "
                     "devueltos por SpinQuasar, sin entrenar el QSVM. "
-                    "Desmarcala para ejecutar el QSVM piloto de 7 circuitos."
+                    "Desmarcala para ejecutar la evaluación QSVM balanceada de 26 circuitos."
                 ),
                 key="spinq_connectivity_only",
             )
@@ -135,17 +176,17 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
             # ========================================================
             if selected_quantum_execution_target == "spinq":
 
-                expected_circuits = 1 if spinq_connectivity_only else 7
+                expected_circuits = 1 if spinq_connectivity_only else 26
                 spinq_counter_box.info(
                     f"Circuitos completados: 0 de {expected_circuits} | "
                     "Preparando ejecución..."
                 )
 
                 spinq_status_container = st.empty()
-                with spinq_status_container.status(
-                    "Ejecutando QSVM físicamente en SpinQ...",
-                    expanded=True,
-                ) as status:
+                spinq_status_container.info(
+                    "Ejecutando QSVM físicamente en SpinQ..."
+                )
+                with st.container():
 
                     st.write("Conectando con SpinQ Triangulum...")
 
@@ -155,7 +196,9 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
                     from src.quantum.spinq_connector import connect_to_spinq
                     from src.preprocessing.quantum_preprocessing import (
                         prepare_quantum_dataset,
+                        select_balanced_quantum_subset,
                     )
+                    from src.quantum.qsvm_feature_map import build_qiskit_qsvm_feature_map
 
                     from sklearn.metrics import (
                         accuracy_score,
@@ -211,29 +254,38 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
                         "Dataset preparado. Seleccionando muestras balanceadas..."
                     )
 
-                    # Piloto mínimo balanceado: una muestra de cada clase
-                    # para train y otra de cada clase para test.
-                    def select_balanced_pair(features, labels):
-                        labels = np.asarray(labels)
-                        classes = np.unique(labels)
-                        if len(classes) < 2:
-                            raise ValueError(
-                                "El piloto QSVM necesita dos clases en el dataset."
-                            )
-                        indices = [
-                            int(np.flatnonzero(labels == class_label)[0])
-                            for class_label in classes[:2]
-                        ]
-                        return np.asarray(features)[indices], labels[indices]
-
-                    X_train, y_train = select_balanced_pair(
+                    X_train, y_train = select_balanced_quantum_subset(
                         dataset_bundle.X_train,
                         dataset_bundle.y_train,
+                        samples_per_class=2,
                     )
-                    X_test, y_test = select_balanced_pair(
+                    X_test, y_test = select_balanced_quantum_subset(
                         dataset_bundle.X_test,
                         dataset_bundle.y_test,
+                        samples_per_class=2,
                     )
+
+                    from qiskit_machine_learning.kernels import FidelityQuantumKernel
+
+                    preflight_kernel = FidelityQuantumKernel(
+                        feature_map=build_qiskit_qsvm_feature_map(3)
+                    )
+                    preflight_train = preflight_kernel.evaluate(X_train)
+                    preflight_test = preflight_kernel.evaluate(X_test, y_vec=X_train)
+                    preflight_model = SVC(
+                        kernel="precomputed",
+                        class_weight="balanced",
+                    )
+                    preflight_model.fit(preflight_train, y_train)
+                    preflight_prediction = preflight_model.predict(preflight_test)
+                    if not np.any(
+                        (np.asarray(y_test) == 1) & (preflight_prediction == 1)
+                    ):
+                        raise RuntimeError(
+                            "La prevalidación local no separó ambas clases. "
+                            "La ejecución física fue cancelada para no gastar "
+                            "26 circuitos en una cohorte no informativa."
+                        )
 
                     st.write(
                         f"Dataset físico: "
@@ -290,30 +342,28 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
                                 value,
                             )
 
-                        # Entrelazamiento
-                        circuit << (
-                            CX,
-                            (qubits[0], qubits[1]),
-                        )
-
-                        circuit << (
-                            CX,
-                            (qubits[1], qubits[2]),
-                        )
+                        # Entrelazamiento dependiente de los datos.
+                        for control, target in ((0, 1), (1, 2)):
+                            circuit << (CX, (qubits[control], qubits[target]))
+                            circuit << (
+                                Rz,
+                                qubits[target],
+                                2.0 * float(x_a[control]) * float(x_a[target]),
+                            )
+                            circuit << (CX, (qubits[control], qubits[target]))
 
                         # ============================================
                         # U†(x_b)
                         # ============================================
 
-                        circuit << (
-                            CX,
-                            (qubits[1], qubits[2]),
-                        )
-
-                        circuit << (
-                            CX,
-                            (qubits[0], qubits[1]),
-                        )
+                        for control, target in ((1, 2), (0, 1)):
+                            circuit << (CX, (qubits[control], qubits[target]))
+                            circuit << (
+                                Rz,
+                                qubits[target],
+                                -2.0 * float(x_b[control]) * float(x_b[target]),
+                            )
+                            circuit << (CX, (qubits[control], qubits[target]))
 
                         for q_idx in range(3):
 
@@ -446,10 +496,8 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
                             f"Shots recibidos: {connectivity_result['shots']}"
                         )
                         st.json(connectivity_result["counts"])
-                        status.update(
-                            label="Prueba de conexión SpinQ completada",
-                            state="complete",
-                            expanded=False,
+                        spinq_status_container.success(
+                            "Prueba de conexión SpinQ completada"
                         )
                         return
 
@@ -603,7 +651,8 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
                     )
 
                     qsvm_model = SVC(
-                        kernel="precomputed"
+                        kernel="precomputed",
+                        class_weight="balanced",
                     )
 
                     qsvm_model.fit(
@@ -618,6 +667,28 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
                     y_true = np.asarray(
                         y_test
                     )
+
+                    kernel_deviations = np.concatenate(
+                        (
+                            np.abs(
+                                train_kernel_matrix_real
+                                - np.asarray(preflight_train, dtype=float)
+                            ).ravel(),
+                            np.abs(
+                                test_kernel_matrix_real
+                                - np.asarray(preflight_test, dtype=float)
+                            ).ravel(),
+                        )
+                    )
+                    quantum_noise = {
+                        "mean_absolute_deviation": float(
+                            np.mean(kernel_deviations)
+                        ),
+                        "max_absolute_deviation": float(
+                            np.max(kernel_deviations)
+                        ),
+                        "comparison_points": int(kernel_deviations.size),
+                    }
 
                     # ------------------------------------------------
                     # 10. MÉTRICAS
@@ -664,6 +735,10 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
                         "sample_size": len(X_test),
                         "rows": len(X_test),
                         "execution_target": "spinq",
+                        "pipeline_version": "qsvm_fidelity_v2",
+                        "num_qubits": 3,
+                        "dataset_source": selected_quantum_dataset_source,
+                        "quantum_noise": quantum_noise,
                     }
 
                     st.session_state[
@@ -678,15 +753,18 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
                         "quantum_lab_results_source"
                     ] = selected_quantum_dataset_source
 
-                    status.update(
-                        label="QSVM físico completado en SpinQ",
-                        state="complete",
-                        expanded=False,
+                    try:
+                        save_results(spinq_results, QUANTUM_HARDWARE_RESULTS_PATH)
+                    except OSError as persistence_error:
+                        st.session_state["spinq_lab_persistence_warning"] = str(
+                            persistence_error
+                        )
+
+                    spinq_status_container.success(
+                        "QSVM físico completado en SpinQ"
                     )
 
-                spinq_status_container.empty()
-                circuit_counter.empty()
-                circuit_progress.empty()
+                st.rerun()
 
             # ========================================================
             # SIMULADOR / IBM
@@ -902,6 +980,11 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
         metric_cols[1].metric("Precision", f"{metrics['precision'] * 100:.2f}%")
         metric_cols[2].metric("Recall", f"{metrics['recall'] * 100:.2f}%")
         metric_cols[3].metric("F1-Score", f"{metrics['f1_score'] * 100:.2f}%")
+
+        if result_target == "spinq":
+            render_quantum_noise_card(
+                quantum_lab_results.get("quantum_noise")
+            )
 
         st.markdown("#### Matriz de Confusión")
         st.plotly_chart(

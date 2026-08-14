@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import streamlit as st
 
 from dashboard.analytics import build_quantum_runs_dataframe, make_confusion_chart, make_global_comparison_chart
@@ -124,12 +125,31 @@ def render_overview_tab(model_data: ModelData, selected_model: str) -> None:
         classical["accuracy"] = lab_results["metrics"]["accuracy"]
         classical["f1_score"] = lab_results["metrics"]["f1_score"]
 
-    # Si el usuario corrió una prueba cuántica en el laboratorio, pisamos los valores cuánticos base
+    # Una corrida de simulador actualiza QSVM; una corrida SpinQ actualiza
+    # exclusivamente la referencia de hardware físico.
     quantum_lab_results = st.session_state.get("quantum_lab_results")
     quantum_qubits_used = st.session_state.get("quantum_lab_results_qubits", model_data["Modelo cuantico"]["selected_qubits"])
     if quantum_lab_results and "metrics" in quantum_lab_results:
-        quantum["accuracy"] = quantum_lab_results["metrics"]["accuracy"]
-        quantum["f1_score"] = quantum_lab_results["metrics"]["f1_score"]
+        runtime_metrics = quantum_lab_results["metrics"]
+        runtime_target = quantum_lab_results.get("execution_target", "simulator")
+        destination = hardware if runtime_target == "spinq" else quantum
+        destination.update(
+            {
+                "accuracy": runtime_metrics["accuracy"],
+                "precision": runtime_metrics["precision"],
+                "recall": runtime_metrics["recall"],
+                "f1_score": runtime_metrics["f1_score"],
+                "confusion_matrix": np.array(
+                    quantum_lab_results["confusion_matrix"]
+                ),
+                "source": "real",
+                "source_label": "Resultado real",
+            }
+        )
+        if runtime_target == "spinq":
+            destination["quantum_noise"] = quantum_lab_results.get(
+                "quantum_noise"
+            )
 
     selected_qubits = quantum_qubits_used
     
@@ -142,7 +162,22 @@ def render_overview_tab(model_data: ModelData, selected_model: str) -> None:
     with comp_cols[1]:
         render_info_card("Enfoque QSVM", f"{quantum['accuracy'] * 100:.2f}% Acc", f"Fidelity Quantum Kernel ({selected_qubits}q)\n\nF1-Score: {quantum['f1_score'] * 100:.2f}%")
     with comp_cols[2]:
-        render_info_card("Hardware Físico RMN", f"{hardware['accuracy'] * 100:.2f}% Acc", f"Validación en SpinQ\n\nF1-Score: {hardware['f1_score'] * 100:.2f}%")
+        hardware_noise = hardware.get("quantum_noise") or {}
+        hardware_noise_text = (
+            f" | Ruido est.: {hardware_noise['mean_absolute_deviation'] * 100:.2f}%"
+            if "mean_absolute_deviation" in hardware_noise
+            else ""
+        )
+        render_info_card(
+            "Hardware Físico RMN",
+            f"{hardware['accuracy'] * 100:.2f}% Acc",
+            (
+                "Validación en SpinQ\n\n"
+                f"F1-Score: {hardware['f1_score'] * 100:.2f}% | "
+                f"Muestra: {hardware.get('sample_size') or 0} registros"
+                f"{hardware_noise_text}"
+            ),
+        )
 
     st.write("")
     
