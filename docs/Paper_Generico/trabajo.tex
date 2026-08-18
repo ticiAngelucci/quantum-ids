@@ -1,0 +1,550 @@
+% =====================================================================
+%  Paper de Workshop - Avances de Tesina (v2, QSVM como modelo central)
+%  Compilable en Overleaf (formato IEEE conference)
+% =====================================================================
+\documentclass[10pt,conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+\usepackage[utf8]{inputenc}
+\usepackage[spanish,es-noshorthands]{babel}
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{hyperref}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,shapes.geometric,calc,backgrounds,fit}
+
+\hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
+
+% Traducciones de IEEEtran al español
+\renewcommand{\IEEEkeywordsname}{Palabras clave}
+\renewcommand{\IEEEproofname}{Demostración}
+
+% Comando auxiliar para valores pendientes de completar
+\newcommand{\pendiente}[1]{\textcolor{blue}{\textbf{[#1]}}}
+
+\begin{document}
+
+% ============================ PORTADA =================================
+\title{Detección de Anomalías en Tráfico de Red mediante Máquinas de
+Vectores de Soporte Cuánticas:\\ Validación Empírica en Hardware Cuántico
+de Resonancia Magnética Nuclear}
+
+\author{
+\IEEEauthorblockN{Ticiana Angelucci}
+\IEEEauthorblockA{Licenciatura en Sistemas\\
+Universidad Champagnat\\
+Mendoza, Argentina}
+\and
+\IEEEauthorblockN{Rodrigo Elgueta}
+\IEEEauthorblockA{Director de Tesina\\
+Universidad Champagnat\\
+Mendoza, Argentina}
+\and
+\IEEEauthorblockN{Andrés A. Reynoso}
+\IEEEauthorblockA{Asesor Científico\\
+Instituto Balseiro\\
+Bariloche, Argentina}
+}
+
+\maketitle
+
+% ============================ RESUMEN =================================
+\begin{abstract}
+Los Sistemas de Detección de Intrusos (IDS) basados en Machine Learning
+clásico enfrentan limitaciones crecientes ante el volumen y la
+complejidad del tráfico de red moderno. El Quantum Machine Learning
+(QML) ofrece un paradigma alternativo que proyecta los datos en espacios
+de características de alta dimensionalidad (espacios de Hilbert). Este
+trabajo presenta una Máquina de Vectores de Soporte Cuántica (QSVM)
+basada en un kernel cuántico de fidelidad para la clasificación binaria
+de tráfico de red benigno y malicioso, empleando el dataset
+CIC-IDS-2017. Se documenta la decisión de diseño de abandonar un
+Clasificador Cuántico Variacional (VQC) --afectado por el problema de
+mesetas estériles (\textit{barren plateaus})-- en favor del enfoque de
+kernel, más robusto para datos tabulares de ciberseguridad. El modelo
+QSVM alcanzó una exactitud del $83{,}3\%$ en simulación clásica. La
+validación se trasladó a hardware cuántico real de Resonancia Magnética
+Nuclear (SpinQ Triangulum, 3 qubits), donde una prueba sobre tráfico en
+vivo arrojó una exactitud del $75\%$, una precisión del $100\%$ y un
+F1-Score del $80\%$, con una desviación media del kernel del
+$12{,}94\%$ respecto del valor ideal. Los resultados evidencian tanto
+la viabilidad funcional del enfoque como el impacto del ruido inherente
+a la era NISQ.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Quantum Machine Learning, QSVM, kernel cuántico, detección de intrusos,
+era NISQ, resonancia magnética nuclear, CIC-IDS-2017, ciberseguridad.
+\end{IEEEkeywords}
+
+% ============================ I. INTRODUCCIÓN =========================
+\section{Introducción}
+La evolución y sofisticación de los ciberataques, sumada al crecimiento
+exponencial del tráfico en las infraestructuras de red, ha llevado a los
+Sistemas de Detección de Intrusos (IDS) clásicos a un punto de
+saturación. Los enfoques basados en firmas y, más recientemente, en
+Machine Learning (ML) clásico, alcanzan un techo de rendimiento y
+escalabilidad frente a la alta dimensionalidad de los datos de red
+modernos, lo que se traduce en tasas elevadas de falsos positivos y
+negativos.
+
+El Quantum Machine Learning (QML) emerge como un cambio de paradigma
+prometedor \cite{biamonte2017}. Su ventaja teórica radica en la
+capacidad de mapear datos complejos en espacios de Hilbert de
+dimensionalidad exponencial, habilitando fronteras de separación
+inaccesibles para los métodos clásicos. No obstante, la industria
+transita actualmente la era NISQ (\textit{Noisy Intermediate-Scale
+Quantum}) \cite{preskill2018}, caracterizada por procesadores de escala
+intermedia con alta susceptibilidad al ruido, la decoherencia y los
+errores de compuerta.
+
+Esta investigación se centra en una Máquina de Vectores de Soporte
+Cuántica (QSVM) que emplea un circuito cuántico para estimar un kernel
+de similitud entre muestras de tráfico de red, delegando la
+clasificación final en una SVM clásica. A diferencia de los circuitos
+variacionales puros, este enfoque evita los bucles de optimización
+cuántica iterativa y, con ello, el colapso por mesetas estériles.
+
+Las principales contribuciones de este reporte de avance son:
+\begin{itemize}
+  \item El diseño e implementación de una QSVM basada en un kernel
+  cuántico de fidelidad para la clasificación binaria de tráfico de
+  red, con un \textit{pipeline} de preprocesamiento adaptado a un
+  procesador de 3 qubits.
+  \item El análisis comparativo que motivó la transición desde un
+  Clasificador Cuántico Variacional (VQC) hacia el enfoque de kernel,
+  documentando el fenómeno de mesetas estériles sobre datos tabulares.
+  \item Resultados empíricos de ejecución en un procesador cuántico de
+  Resonancia Magnética Nuclear (SpinQ Triangulum), contrastados con la
+  simulación clásica ideal.
+\end{itemize}
+
+El resto del documento se organiza de la siguiente manera: la Sección
+II presenta el marco teórico; la Sección III detalla la metodología; la
+Sección IV describe la implementación; la Sección V expone los
+resultados experimentales; la Sección VI discute los hallazgos; y la
+Sección VII concluye y delinea el trabajo futuro.
+
+% ============================ II. MARCO TEÓRICO =======================
+\section{Marco Teórico y Trabajos Relacionados}
+
+\subsection{IDS y Machine Learning clásico}
+Históricamente, la detección de intrusos ha dependido de firmas
+conocidas o de anomalías estadísticas simples. La literatura reciente
+documenta una transición hacia algoritmos de ML clásico
+(\textit{Random Forest}, SVM, redes neuronales profundas), que mejoran
+la clasificación pero enfrentan barreras de escalabilidad. En este
+trabajo se adopta un modelo \textit{Random Forest} como línea base
+(\textit{baseline}) de referencia.
+
+\subsection{Quantum Machine Learning y kernels cuánticos}
+El QML explota la superposición y el entrelazamiento para procesar
+información \cite{biamonte2017}. Dentro de este campo, los métodos
+basados en kernels cuánticos resultan particularmente atractivos para la
+era NISQ: un circuito cuántico actúa como un mapa de características
+(\textit{feature map}) que proyecta los datos clásicos en un espacio de
+Hilbert de alta dimensionalidad, y la similitud entre muestras se
+estimación mediante una medida de fidelidad cuántica. La clasificación
+final recae en un modelo clásico (SVM), lo que confiere estabilidad al
+conjunto.
+
+\subsection{Clasificadores variacionales y mesetas estériles}
+Los Clasificadores Cuánticos Variacionales (VQC) son el análogo
+cuántico de una red neuronal: combinan un \textit{feature map} con un
+circuito parametrizado (\textit{ansatz}) cuyos pesos se optimizan
+iterativamente con un optimizador clásico (p.~ej., COBYLA). Sin
+embargo, los VQC sufren de \textit{barren plateaus}: a medida que
+crecen los qubits y la profundidad del circuito, los gradientes se
+aplanan exponencialmente hacia cero y el optimizador queda «ciego».
+Este fenómeno, sumado a la incompatibilidad de los datos tabulares de
+red con la geometría natural de los circuitos profundos, motivó la
+adopción del enfoque QSVM en este trabajo (Sección III-D).
+
+\subsection{Dataset CIC-IDS-2017}
+Se emplea el conjunto de datos público CIC-IDS-2017
+\cite{sharafaldin2018}, generado por el \textit{Canadian Institute for
+Cybersecurity}. Contiene tráfico benigno y múltiples tipos de ataques
+(DDoS, \textit{botnet}, fuerza bruta), con más de 70 características
+por conexión y etiquetado supervisado. Su uso garantiza validez
+científica y comparabilidad con el estado del arte.
+
+\subsection{Hardware cuántico de Resonancia Magnética Nuclear}
+La validación física se realiza sobre un procesador SpinQ Triangulum,
+una computadora cuántica de escritorio basada en Resonancia Magnética
+Nuclear (RMN) de 3 qubits. A diferencia de las arquitecturas
+superconductoras, la RMN opera mediante pulsos de radiofrecuencia sobre
+un conjunto macroscópico de moléculas y devuelve distribuciones de
+conteos por cada ejecución. Sus principales limitaciones son los tiempos
+de relajación ($T_1$) y de decoherencia ($T_2$), que degradan los
+estados cuánticos durante la ejecución del circuito.
+
+% ============================ III. METODOLOGÍA ========================
+\section{Metodología}
+
+La investigación adopta un enfoque cuantitativo y experimental,
+estructurado en el \textit{pipeline} ilustrado en la
+Fig.~\ref{fig:arquitectura}.
+
+\begin{figure}[!t]
+\centering
+\begin{tikzpicture}[
+  node distance=0.75cm and 0.5cm,
+  box/.style={draw, rounded corners=2pt, align=center, font=\scriptsize,
+              minimum height=0.85cm, minimum width=2.1cm, fill=blue!8},
+  qbox/.style={draw, rounded corners=2pt, align=center, font=\scriptsize,
+              minimum height=0.85cm, minimum width=2.1cm, fill=orange!15},
+  arr/.style={-{Stealth[length=2.5mm]}, thick}
+]
+\node[box] (data) {Dataset\\CIC-IDS-2017};
+\node[box, right=of data] (pre) {Preprocesado\\SelectKBest\\$+$ Escalado $[-1,1]$};
+\node[qbox, right=of pre] (fm) {Feature Map\\ZZFeatureMap};
+\node[qbox, right=of fm] (kernel) {Kernel de\\Fidelidad};
+\node[box, right=of kernel] (svm) {SVM\\Clásica};
+\node[box, below=0.9cm of svm] (out) {Clasificación\\Benigno / Ataque};
+
+\node[box, below=0.9cm of fm, fill=green!10] (sim) {Simulador\\clásico (ideal)};
+\node[box, right=0.6cm of sim, fill=red!10] (hw) {Hardware real\\SpinQ (ruido)};
+
+\draw[arr] (data) -- (pre);
+\draw[arr] (pre) -- (fm);
+\draw[arr] (fm) -- (kernel);
+\draw[arr] (kernel) -- (svm);
+\draw[arr] (svm) -- (out);
+\draw[arr] (fm) -- (sim);
+\draw[arr] (fm) -- (hw);
+\draw[arr] (sim) -- (kernel);
+\draw[arr] (hw) -- (kernel);
+
+\begin{scope}[on background layer]
+\node[draw, dashed, rounded corners=3pt, inner sep=4pt,
+      fit=(fm)(kernel)(sim)(hw), fill=gray!5] {};
+\end{scope}
+\node[font=\scriptsize\itshape, anchor=north west] at
+  ($(fm.north west)+(0,0.65)$) {Núcleo cuántico (Qiskit)};
+\end{tikzpicture}
+\caption{Arquitectura general del \textit{pipeline} QSVM. El núcleo
+cuántico puede ejecutarse sobre un simulador clásico o sobre hardware
+físico antes de la etapa de clasificación clásica.}
+\label{fig:arquitectura}
+\end{figure}
+
+\subsection{Preprocesamiento de datos}
+El dataset original supera las 70 características, incompatibles con un
+procesador de 3 qubits. El preprocesamiento incluye: limpieza de
+valores nulos e infinitos, conversión de etiquetas a formato binario
+(benigno frente a ataque), y selección de las $k=3$ características más
+discriminativas mediante \texttt{SelectKBest} (test de información
+mutua). Se descartó el PCA tradicional para el modelo cuántico por
+producir componentes de difícil interpretación física en espacios
+reducidos. Los valores se escalan al rango $[-1,1]$ con un
+\texttt{MinMaxScaler} ajustado, para evitar el fenómeno de
+\textit{phase wrapping} en las compuertas de rotación del circuito.
+
+\subsection{Arquitectura QSVM: feature map y kernel de fidelidad}
+La codificación se realiza mediante un \texttt{ZZFeatureMap} con
+entrelazamiento lineal. Para un vector de entrada $\mathbf{x}$, el
+estado cuántico se prepara como:
+\begin{equation}
+  |\phi(\mathbf{x})\rangle = U_{\mathrm{FM}}(\mathbf{x})|0\rangle^{\otimes n},
+\end{equation}
+donde $U_{\mathrm{FM}}$ aplica rotaciones $Z$ dependientes de los datos
+y compuertas $ZZ$ que entrelazan qubits adyacentes. El kernel cuántico
+de fidelidad entre dos muestras se define como:
+\begin{equation}
+  K(\mathbf{x}_i,\mathbf{x}_j) =
+  \big|\langle \phi(\mathbf{x}_i)\,|\,\phi(\mathbf{x}_j)\rangle\big|^{2}
+  = \big|\langle 0|U_{\mathrm{FM}}^\dagger(\mathbf{x}_j)
+    U_{\mathrm{FM}}(\mathbf{x}_i)|0\rangle\big|^{2}.
+  \label{eq:kernel}
+\end{equation}
+Esta matriz de similitudes alimenta una SVM clásica, que aprende la
+frontera de separación entre las clases. El entrelazamiento lineal (en
+lugar de completo) reduce el número de compuertas CNOT cruzadas,
+mitigando la decoherencia en hardware físico; en el procesador real se
+emplea una profundidad de \texttt{reps}$=1$ para minimizar el tiempo de
+exposición al ruido.
+
+\subsection{Decisión de diseño: del VQC al QSVM}
+El modelo inicial de esta investigación fue un VQC entrenado con
+COBYLA. Sin embargo, al escalar el volumen de datos y la profundidad
+del \textit{ansatz}, el entrenamiento colapsó hacia métricas cercanas
+al azar, síntoma inequívoco de mesetas estériles. Los datos tabulares
+de ciberseguridad carecen de la estructura geométrica que los circuitos
+variacionales profundos mapean eficientemente.
+
+La transición hacia el QSVM constituyó el punto de inflexión: al
+separar el cómputo cuántico (el kernel es estático y no requiere
+optimización iterativa) del entrenamiento clásico (SVM), se elimina el
+riesgo de colapso por gradientes planos. Esta decisión de diseño,
+documentada como lección aprendida, fue la que permitió alcanzar un
+rendimiento estable y reproducible.
+
+\subsection{Estrategia de validación en hardware}
+Dada la limitación de qubits y el costo computacional del kernel, la
+validación física se acota a subconjuntos reducidos de entrenamiento y
+prueba. El número de circuitos de fidelidad requeridos crece según la
+Tabla~\ref{tab:complejidad}.
+
+\begin{table}[!t]
+\centering
+\caption{Circuitos de fidelidad requeridos por tamaño de muestra.}
+\label{tab:complejidad}
+\begin{tabular}{@{}ccc@{}}
+\toprule
+Muestras train & Muestras test & Circuitos cuánticos \\
+\midrule
+4  & 4  & 26 \\
+6  & 4  & 45 \\
+8  & 4  & 68 \\
+8  & 8  & 100 \\
+10 & 10 & 155 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================ IV. IMPLEMENTACIÓN ======================
+\section{Implementación}
+
+\subsection{Stack tecnológico}
+El prototipo se desarrolló en Python, empleando Qiskit y
+\texttt{qiskit-machine-learning} para el modelado cuántico
+\cite{qiskit2023}; \texttt{scikit-learn}, \texttt{pandas} y
+\texttt{numpy} para el preprocesamiento y el \textit{baseline} clásico;
+y Streamlit para el \textit{dashboard} de visualización. La simulación
+local se realizó con \texttt{qiskit-aer}.
+
+\subsection{Generación de tráfico y detección en vivo}
+Para evaluar el modelo frente a ataques realistas se implementó un
+simulador de tráfico basado en Scapy, capaz de generar inundaciones TCP
+SYN, UDP e ICMP, así como ataques híbridos multivector y tráfico de
+fondo. Un módulo de detección en vivo captura paquetes, extrae
+características por ventanas temporales y las clasifica en tiempo real.
+
+\subsection{Integración con hardware cuántico}
+La ejecución física se realiza sobre un procesador SpinQ Triangulum
+(RMN, 3 qubits). La conexión se gestiona mediante la librería
+\texttt{spinqit} sobre TCP/IP. A diferencia de los dispositivos
+superconductores, el hardware de RMN opera mediante pulsos de
+radiofrecuencia sobre un conjunto macroscópico de moléculas y devuelve
+distribuciones de conteos (\textit{counts}) por cada ejecución, con
+$1024$ disparos por circuito.
+
+\subsection{Circuito de fidelidad}
+La Fig.~\ref{fig:circuito} esquematiza el circuito empleado. Los tres
+qubits codifican las características seleccionadas; las compuertas de
+Hadamard preparan la superposición, las rotaciones $R_z$ codifican los
+datos, y las compuertas CNOT introducen dependencias entre
+características. La fidelidad se estima a partir de la probabilidad de
+medir el estado $|000\rangle$:
+\begin{equation}
+  \widehat{F} \approx \frac{N_{000}}{N_{\text{shots}}},
+  \label{eq:fidelidad}
+\end{equation}
+con $N_{\text{shots}}=1024$. El circuito prepara el estado de la
+muestra A, aplica la operación inversa correspondiente a la muestra B,
+y mide la probabilidad de retornar al estado fundamental.
+
+\begin{figure}[!t]
+\centering
+\begin{tikzpicture}[scale=0.9]
+\def\xh{0}      % etiqueta |0>
+\def\xone{1.0}  % H
+\def\xrz{2.0}   % Rz datos A
+\def\xcnot{3.1} % CNOT
+\def\xrzB{4.4}  % Rz datos B
+\def\xhtwo{5.4} % H final
+\def\xmeas{6.4} % medición
+\def\gw{0.62}   % ancho compuerta
+
+\foreach \y/\lbl in {2/$q_0$, 1/$q_1$, 0/$q_2$}{
+  \draw[thick] (0.6,\y) -- (7.1,\y);
+  \node[left, font=\scriptsize] at (\xh,\y) {$|0\rangle$};
+  \node[left=2pt, font=\scriptsize] at (0.6,\y) {\lbl};
+  % Medición
+  \draw[fill=white] (\xmeas-0.28,\y-0.28) rectangle ++(0.56,0.56);
+  \node[font=\tiny] at (\xmeas,\y) {M};
+}
+
+% Compuertas H (preparación)
+\foreach \y in {2,1,0}{
+  \draw[fill=blue!15] (\xone-0.28,\y-0.28) rectangle ++(0.56,0.56);
+  \node[font=\scriptsize] at (\xone,\y) {H};
+  % Rz (codificación A)
+  \draw[fill=orange!25] (\xrz-0.28,\y-0.28) rectangle ++(0.56,0.56);
+  \node[font=\tiny] at (\xrz,\y) {$R_z$};
+  % Rz (codificación B, inversa)
+  \draw[fill=orange!25] (\xrzB-0.28,\y-0.28) rectangle ++(0.56,0.56);
+  \node[font=\tiny] at (\xrzB,\y) {$R_z^\dagger$};
+  % H final
+  \draw[fill=blue!15] (\xhtwo-0.28,\y-0.28) rectangle ++(0.56,0.56);
+  \node[font=\scriptsize] at (\xhtwo,\y) {H};
+}
+
+% CNOT q0 -> q1
+\draw[thick] (\xcnot,2) -- (\xcnot,1);
+\filldraw (\xcnot,2) circle (2.2pt);
+\draw (\xcnot,1) circle (0.22); \draw (\xcnot-0.22,1) -- ++(0.44,0);
+\draw (\xcnot,1-0.22) -- ++(0,0.44);
+% CNOT q1 -> q2
+\draw[thick] (\xcnot,1) -- (\xcnot,0);
+\filldraw (\xcnot,1) circle (2.2pt);
+\draw (\xcnot,0) circle (0.22); \draw (\xcnot-0.22,0) -- ++(0.44,0);
+\draw (\xcnot,0-0.22) -- ++(0,0.44);
+
+\node[font=\scriptsize\itshape] at (3.85,-0.85)
+  {Codificación $U(\mathbf{x}_A)$ y comparación $U^\dagger(\mathbf{x}_B)$};
+\end{tikzpicture}
+\caption{Esquema del circuito de fidelidad para 3 qubits. Compara dos
+registros de red midiendo la probabilidad de retornar al estado
+$|000\rangle$.}
+\label{fig:circuito}
+\end{figure}
+
+% ============================ V. RESULTADOS ===========================
+\section{Resultados Experimentales}
+
+\subsection{Configuración experimental}
+La Tabla~\ref{tab:config} resume la configuración del modelo cuántico.
+
+\begin{table}[!t]
+\centering
+\caption{Configuración del modelo QSVM.}
+\label{tab:config}
+\begin{tabular}{@{}ll@{}}
+\toprule
+Parámetro & Valor \\
+\midrule
+Qubits & 3 \\
+Feature Map & ZZFeatureMap (entrelazamiento lineal) \\
+Profundidad (hardware) & \texttt{reps}$=1$ \\
+Selección de características & SelectKBest ($k=3$) \\
+Escalado & MinMax $[-1,1]$ \\
+Kernel & FidelityQuantumKernel \\
+Clasificador & SVM clásica \\
+Disparos (\textit{shots}) & 1024 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Baseline clásico y QSVM en simulación}
+La Tabla~\ref{tab:resultados} consolida las métricas obtenidas en los
+distintos entornos evaluados.
+
+\begin{table}[!t]
+\centering
+\caption{Comparación de métricas por entorno (\%).}
+\label{tab:resultados}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+Modelo / Entorno & Acc. & Prec. & Recall & F1 \\
+\midrule
+Random Forest (clásico) & \pendiente{completar} & \pendiente{completar}
+  & \pendiente{completar} & \pendiente{completar} \\
+QSVM (simulador) & 83{,}3 & \pendiente{completar}
+  & \pendiente{completar} & \pendiente{completar} \\
+QSVM (SpinQ, laboratorio) & 25{,}0 & 33{,}3 & 50{,}0 & 40{,}0 \\
+QSVM (SpinQ, en vivo) & 75{,}0 & 100{,}0 & 66{,}7 & 80{,}0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+El modelo QSVM en simulación alcanzó una exactitud del $83{,}3\%$, un
+resultado significativamente superior al del VQC, que no logró
+convergencia estable sobre los mismos datos. Este contraste constituye
+la principal evidencia empírica que justificó la transición de
+arquitectura.
+
+\subsection{QSVM en hardware cuántico real}
+La primera ejecución en el laboratorio (dataset estático) arrojó
+métricas cercanas al azar ($25\%$ de exactitud), atribuibles a la
+compresión extrema en 3 qubits, la decoherencia y una decodificación
+heurística simplificada.
+
+Tras refinar la selección de características, el embedding y el
+criterio de decodificación, la validación sobre tráfico en vivo alcanzó
+una exactitud del $75\%$, con una precisión del $100\%$ (ausencia total
+de falsos positivos) y un F1-Score del $80\%$. En una validación
+acotada final (4 muestras de entrenamiento y 4 de prueba) el QSVM
+clasificó correctamente los 8 registros, obteniendo una matriz de
+confusión con 2 verdaderos positivos y 2 verdaderos negativos; no
+obstante, el kernel físico presentó una desviación media del
+$12{,}94\%$ (desviación máxima del $47{,}95\%$) respecto del kernel
+ideal del simulador.
+
+% ============================ VI. DISCUSIÓN ===========================
+\section{Discusión}
+
+\subsection{Robustez del enfoque de kernel}
+La transición del VQC al QSVM constituyó el hallazgo metodológico más
+relevante. Los datos tabulares de ciberseguridad carecen de la
+estructura geométrica que los circuitos variacionales profundos mapean
+eficientemente; el enfoque de kernel, en cambio, aprovecha la
+expresividad del espacio de Hilbert sin depender de bucles de
+optimización cuántica, evitando las mesetas estériles. Esta lección es
+transferible a otros problemas de clasificación tabular en la era NISQ.
+
+\subsection{Impacto del ruido NISQ}
+El ruido de decoherencia ($T_1$, $T_2$) y las imperfecciones de los
+pulsos de radiofrecuencia introducen estados espurios en las mediciones
+(p.~ej., los conteos $|01\rangle$ y $|10\rangle$ en un estado de Bell).
+Curiosamente, en el experimento en vivo el hardware superó a la primera
+prueba de laboratorio, fenómeno atribuible a una mayor separabilidad de
+las clases en las ventanas de tráfico atacado y, posiblemente, a un
+efecto de regularización por ruido. Este resultado, si bien prometedor,
+debe interpretarse con cautela dado el tamaño muestral reducido.
+
+\subsection{Limitaciones}
+Las principales limitaciones son: (i) la compresión a 3 qubits, que
+descarta información discriminativa; (ii) el tamaño acotado de las
+muestras de prueba en hardware; y (iii) el costo cuadrático del cálculo
+del kernel. Estos factores impiden, por el momento, generalizar los
+resultados a escala industrial.
+
+% ============================ VII. CONCLUSIONES =======================
+\section{Conclusiones y Trabajo Futuro}
+Este trabajo demuestra la viabilidad funcional de un clasificador QSVM
+para la detección de anomalías en tráfico de red, tanto en simulación
+como en hardware cuántico real de RMN. El QSVM superó al VQC en
+estabilidad y precisión, y el hardware físico produjo clasificaciones
+significativamente superiores al azar pese al ruido inherente.
+
+Como trabajo futuro se prevé: (i) ampliar el tamaño de las muestras de
+validación física; (ii) explorar embeddings con entrelazamiento
+dependiente de los datos para enriquecer el kernel; (iii) aplicar
+técnicas de mitigación de errores (extrapolación a ruido cero); (iv)
+extender la comparación a plataformas superconductoras y de iones
+atrapados vía IBM Quantum y Amazon Braket; y (v) consolidar el
+\textit{dashboard} interactivo como herramienta de referencia.
+
+% ============================ REFERENCIAS =============================
+\begin{thebibliography}{9}
+
+\bibitem{biamonte2017}
+J. Biamonte, P. Wittek, N. Pancotti, P. Rebentrost, N. Wiebe y S. Lloyd,
+``Quantum machine learning,'' \textit{Nature}, vol. 549, n.º 7671,
+pp. 195--202, 2017.
+
+\bibitem{preskill2018}
+J. Preskill, ``Quantum Computing in the NISQ era and beyond,''
+\textit{Quantum}, vol. 2, p. 79, 2018.
+
+\bibitem{sharafaldin2018}
+I. Sharafaldin, A. H. Lashkari y A. Ghorbani, ``Toward generating a new
+intrusion detection dataset and intrusion traffic characterization,''
+en \textit{Proc. ICISSP}, 2018, pp. 108--116.
+
+\bibitem{qiskit2023}
+Qiskit contributors, ``Qiskit: An open-source framework for quantum
+computing,'' IBM Quantum, 2023.
+
+\bibitem{ibm2024}
+IBM Quantum, ``IBM Quantum Learning.'' [En línea]. Disponible:
+\url{https://learning.quantum.ibm.com/}.
+
+\end{thebibliography}
+
+\end{document}
