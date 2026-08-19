@@ -1,7 +1,7 @@
 # Fdb version 4
-["pdflatex"] 1787154582.48217 "/home/relgueta/Documentos/uch/TesisTiciana/quantum-ids/docs/Paper_Generico/trabajo.tex" "trabajo.pdf" "trabajo" 1787154583.10847 0
+["pdflatex"] 1787155036.20419 "/home/relgueta/Documentos/uch/TesisTiciana/quantum-ids/docs/Paper_Generico/trabajo.tex" "trabajo.pdf" "trabajo" 1787155036.83212 0
   "/etc/texmf/web2c/texmf.cnf" 1777403249.01097 475 c0e671620eb5563b2130f56340a5fde8 ""
-  "/home/relgueta/Documentos/uch/TesisTiciana/quantum-ids/docs/Paper_Generico/trabajo.tex" 1787154581.50395 27802 27d2d5bea009bab9b1e01db0ecd46bcc ""
+  "/home/relgueta/Documentos/uch/TesisTiciana/quantum-ids/docs/Paper_Generico/trabajo.tex" 1787155035.42296 28387 103917c0cf43790e596579d6c74a9072 ""
   "/usr/share/texlive/texmf-dist/fonts/enc/dvips/base/8r.enc" 1165713224 4850 80dc9bab7f31fb78a000ccfed0e27cab ""
   "/usr/share/texlive/texmf-dist/fonts/map/fontname/texfonts.map" 1577235249 3524 cb3e574dea2d1052e39280babc910dc8 ""
   "/usr/share/texlive/texmf-dist/fonts/tfm/adobe/courier/pcrr7t.tfm" 1136768653 960 379cc0019370a9e0208a0a3f949f847a ""
@@ -202,9 +202,9 @@
   "/usr/share/texmf/web2c/texmf.cnf" 1769369718 41603 27f93b3067076450172040dcd57ca8b3 ""
   "/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map" 1785789869 5541477 3118940318599480888143717dd32d64 ""
   "/var/lib/texmf/web2c/pdftex/pdflatex.fmt" 1785789974 3639821 3bde7677cf3f80aae5fcc08f3eb6865c ""
-  "trabajo.aux" 1787154583.0531 6663 a2d0717f79812a6451f3d37a6269db55 "pdflatex"
-  "trabajo.out" 1787154583.0541 6396 f7af2964cec63dcede80ca533cbaadb1 "pdflatex"
-  "trabajo.tex" 1787154581.50395 27802 27d2d5bea009bab9b1e01db0ecd46bcc ""
+  "trabajo.aux" 1787155036.77674 6815 ed1748f6ed93d10cbd94492fbdc78cc1 "pdflatex"
+  "trabajo.out" 1787155036.77774 6396 f7af2964cec63dcede80ca533cbaadb1 "pdflatex"
+  "trabajo.tex" 1787155035.42296 28387 103917c0cf43790e596579d6c74a9072 ""
   (generated)
   "trabajo.aux"
   "trabajo.log"

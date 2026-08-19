@@ -190,44 +190,60 @@ Fig.~\ref{fig:arquitectura}.
 
 \begin{figure}[!t]
 \centering
+\resizebox{\columnwidth}{!}{%
 \begin{tikzpicture}[
-  node distance=0.75cm and 0.5cm,
+  node distance=0.6cm and 0.8cm,
   box/.style={draw, rounded corners=2pt, align=center, font=\scriptsize,
-              minimum height=0.85cm, minimum width=2.1cm, fill=blue!8},
+              minimum height=1cm, minimum width=3cm, fill=blue!8},
   qbox/.style={draw, rounded corners=2pt, align=center, font=\scriptsize,
-              minimum height=0.85cm, minimum width=2.1cm, fill=orange!15},
+              minimum height=1cm, minimum width=3cm, fill=orange!15},
+  envbox/.style={draw, rounded corners=2pt, align=center, font=\scriptsize,
+              minimum height=0.9cm, minimum width=2.4cm},
   arr/.style={-{Stealth[length=2.5mm]}, thick}
 ]
+
+% ===== Fila superior (izquierda a derecha) =====
 \node[box] (data) {Dataset\\CIC-IDS-2017};
-\node[box, right=of data] (pre) {Preprocesado\\SelectKBest (ANOVA F)\\$+$ Escalado $[-1,1]$};
+\node[box, right=of data] (pre) {Preprocesado\\SelectKBest (ANOVA F)\\Escalado $[-1,1]$};
 \node[qbox, right=of pre] (fm) {Feature Map\\ZZFeatureMap};
-\node[qbox, right=of fm] (kernel) {Kernel de\\Fidelidad};
-\node[box, right=of kernel] (svm) {SVM\\Clásica};
-\node[box, below=0.9cm of svm] (out) {Clasificación\\Benigno / Ataque};
 
-\node[box, below=0.9cm of fm, fill=green!10] (sim) {Simulador\\clásico (ideal)};
-\node[box, right=0.6cm of sim, fill=red!10] (hw) {Hardware real\\SpinQ (ruido)};
+% ===== Fila inferior (derecha a izquierda) =====
+\node[qbox, below=1.4cm of fm] (kernel) {Kernel de\\Fidelidad};
+\node[box, left=of kernel] (svm) {SVM\\Clásica};
+\node[box, left=of svm] (out) {Clasificación\\Benigno / Ataque};
 
+% ===== Entornos de ejecución (debajo del kernel) =====
+\node[envbox, below=1cm of kernel, fill=green!10] (sim) {Simulador\\clásico (ideal)};
+\node[envbox, right=0.6cm of sim, fill=red!10] (hw) {Hardware real\\SpinQ (ruido)};
+
+% ===== Flechas fila superior =====
 \draw[arr] (data) -- (pre);
 \draw[arr] (pre) -- (fm);
+
+% ===== Flecha vertical fm -> kernel =====
 \draw[arr] (fm) -- (kernel);
+
+% ===== Flechas fila inferior (derecha a izquierda) =====
 \draw[arr] (kernel) -- (svm);
 \draw[arr] (svm) -- (out);
-\draw[arr] (fm) -- (sim);
-\draw[arr] (fm) -- (hw);
-\draw[arr] (sim) -- (kernel);
-\draw[arr] (hw) -- (kernel);
 
+% ===== Flechas entornos -> kernel =====
+\draw[arr] (sim.north) -- (kernel.south);
+\draw[arr] (hw.north) -- (kernel.south);
+
+% ===== Recuadro punteado: núcleo cuántico =====
 \begin{scope}[on background layer]
-\node[draw, dashed, rounded corners=3pt, inner sep=4pt,
-      fit=(fm)(kernel)(sim)(hw), fill=gray!5] {};
+\node[draw, dashed, rounded corners=3pt, inner sep=7pt,
+      fit=(fm)(kernel)(sim)(hw), fill=gray!5] (qcore) {};
 \end{scope}
-\node[font=\scriptsize\itshape, anchor=north west] at
-  ($(fm.north west)+(0,0.65)$) {Núcleo cuántico (Qiskit)};
-\end{tikzpicture}
-\caption{Arquitectura general del \textit{pipeline} QSVM. El núcleo
-cuántico puede ejecutarse sobre un simulador clásico o sobre hardware
-físico antes de la etapa de clasificación clásica.}
+\node[font=\scriptsize\itshape, anchor=south] at (qcore.north) {Núcleo cuántico (Qiskit)};
+
+\end{tikzpicture}%
+}
+\caption{Arquitectura general del \textit{pipeline} QSVM. El flujo de
+datos avanza de izquierda a derecha en la fila superior y retorna en la
+inferior. El núcleo cuántico puede ejecutarse sobre un simulador clásico
+o sobre hardware físico antes de la clasificación.}
 \label{fig:arquitectura}
 \end{figure}
 
