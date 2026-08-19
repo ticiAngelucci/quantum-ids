@@ -1,5 +1,6 @@
 % =====================================================================
-%  Paper de Workshop - Avances de Tesina (v2, QSVM como modelo central)
+%  Paper de Workshop - Avances de Tesina (v3, datos corregidos)
+%  QSVM como modelo central - Resultados actualizados
 %  Compilable en Overleaf (formato IEEE conference)
 % =====================================================================
 \documentclass[10pt,conference]{IEEEtran}
@@ -19,12 +20,8 @@
 
 \hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
 
-% Traducciones de IEEEtran al español
 \renewcommand{\IEEEkeywordsname}{Palabras clave}
 \renewcommand{\IEEEproofname}{Demostración}
-
-% Comando auxiliar para valores pendientes de completar
-\newcommand{\pendiente}[1]{\textcolor{blue}{\textbf{[#1]}}}
 
 \begin{document}
 
@@ -58,22 +55,24 @@ Los Sistemas de Detección de Intrusos (IDS) basados en Machine Learning
 clásico enfrentan limitaciones crecientes ante el volumen y la
 complejidad del tráfico de red moderno. El Quantum Machine Learning
 (QML) ofrece un paradigma alternativo que proyecta los datos en espacios
-de características de alta dimensionalidad (espacios de Hilbert). Este
-trabajo presenta una Máquina de Vectores de Soporte Cuántica (QSVM)
-basada en un kernel cuántico de fidelidad para la clasificación binaria
-de tráfico de red benigno y malicioso, empleando el dataset
-CIC-IDS-2017. Se documenta la decisión de diseño de abandonar un
-Clasificador Cuántico Variacional (VQC) --afectado por el problema de
-mesetas estériles (\textit{barren plateaus})-- en favor del enfoque de
-kernel, más robusto para datos tabulares de ciberseguridad. El modelo
-QSVM alcanzó una exactitud del $83{,}3\%$ en simulación clásica. La
-validación se trasladó a hardware cuántico real de Resonancia Magnética
-Nuclear (SpinQ Triangulum, 3 qubits), donde una prueba sobre tráfico en
-vivo arrojó una exactitud del $75\%$, una precisión del $100\%$ y un
-F1-Score del $80\%$, con una desviación media del kernel del
-$12{,}94\%$ respecto del valor ideal. Los resultados evidencian tanto
-la viabilidad funcional del enfoque como el impacto del ruido inherente
-a la era NISQ.
+de características de alta dimensionalidad. Este trabajo presenta una
+Máquina de Vectores de Soporte Cuántica (QSVM) basada en un kernel
+cuántico de fidelidad para la clasificación binaria de tráfico de red
+(benigno frente a malicioso), empleando el dataset CIC-IDS-2017. Se
+documenta la transición desde un Clasificador Cuántico Variacional
+(VQC) --afectado por mesetas estériles (\textit{barren plateaus})--
+hacia el enfoque de kernel, más robusto para datos tabulares. El modelo
+QSVM alcanzó una exactitud del $83{,}33\%$ en simulación clásica
+(596 registros). La validación se trasladó a hardware cuántico real de
+Resonancia Magnética Nuclear (SpinQ Triangulum, 3 qubits), donde se
+realizaron dos experimentos: sobre datos CICIDS preprocesados se obtuvo
+una exactitud del $100\%$ con una desviación del kernel del $12{,}94\%$;
+sobre tráfico capturado en vivo, la exactitud descendió al $50\%$ con
+una desviación del $41{,}71\%$. Ambos experimentos utilizaron 4 muestras
+de entrenamiento y 4 de prueba (26 circuitos cuánticos, $\approx$1 hora
+de ejecución), lo que limita las conclusiones estadísticas pero
+constituye una prueba de viabilidad funcional y un insumo valioso para
+futuras campañas experimentales.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -120,7 +119,8 @@ Las principales contribuciones de este reporte de avance son:
   documentando el fenómeno de mesetas estériles sobre datos tabulares.
   \item Resultados empíricos de ejecución en un procesador cuántico de
   Resonancia Magnética Nuclear (SpinQ Triangulum), contrastados con la
-  simulación clásica ideal.
+  simulación clásica ideal en dos escenarios: datos preprocesados del
+  dataset CICIDS y tráfico capturado en vivo.
 \end{itemize}
 
 El resto del documento se organiza de la siguiente manera: la Sección
@@ -147,10 +147,9 @@ información \cite{biamonte2017}. Dentro de este campo, los métodos
 basados en kernels cuánticos resultan particularmente atractivos para la
 era NISQ: un circuito cuántico actúa como un mapa de características
 (\textit{feature map}) que proyecta los datos clásicos en un espacio de
-Hilbert de alta dimensionalidad, y la similitud entre muestras se
-estimación mediante una medida de fidelidad cuántica. La clasificación
-final recae en un modelo clásico (SVM), lo que confiere estabilidad al
-conjunto.
+Hilbert de alta dimensionalidad, y la similitud entre muestras se estima
+mediante una medida de fidelidad cuántica. La clasificación final recae
+en un modelo clásico (SVM), lo que confiere estabilidad al conjunto.
 
 \subsection{Clasificadores variacionales y mesetas estériles}
 Los Clasificadores Cuánticos Variacionales (VQC) son el análogo
@@ -200,7 +199,7 @@ Fig.~\ref{fig:arquitectura}.
   arr/.style={-{Stealth[length=2.5mm]}, thick}
 ]
 \node[box] (data) {Dataset\\CIC-IDS-2017};
-\node[box, right=of data] (pre) {Preprocesado\\SelectKBest\\$+$ Escalado $[-1,1]$};
+\node[box, right=of data] (pre) {Preprocesado\\SelectKBest (ANOVA F)\\$+$ Escalado $[-1,1]$};
 \node[qbox, right=of pre] (fm) {Feature Map\\ZZFeatureMap};
 \node[qbox, right=of fm] (kernel) {Kernel de\\Fidelidad};
 \node[box, right=of kernel] (svm) {SVM\\Clásica};
@@ -237,12 +236,15 @@ El dataset original supera las 70 características, incompatibles con un
 procesador de 3 qubits. El preprocesamiento incluye: limpieza de
 valores nulos e infinitos, conversión de etiquetas a formato binario
 (benigno frente a ataque), y selección de las $k=3$ características más
-discriminativas mediante \texttt{SelectKBest} (test de información
-mutua). Se descartó el PCA tradicional para el modelo cuántico por
-producir componentes de difícil interpretación física en espacios
-reducidos. Los valores se escalan al rango $[-1,1]$ con un
-\texttt{MinMaxScaler} ajustado, para evitar el fenómeno de
-\textit{phase wrapping} en las compuertas de rotación del circuito.
+discriminativas mediante \texttt{SelectKBest} con test estadístico
+ANOVA F (\texttt{f\_classif}), que evalúa la significancia de cada
+característica respecto a la variable objetivo. Se descartó el PCA
+tradicional para el modelo cuántico por producir componentes de difícil
+interpretación física en espacios reducidos. Los valores se escalan al
+rango $[-1,1]$ con un \texttt{MinMaxScaler} ajustado exclusivamente
+sobre el conjunto de entrenamiento, para evitar el fenómeno de
+\textit{phase wrapping} en las compuertas de rotación del circuito y
+prevenir fuga de información (\textit{data leakage}).
 
 \subsection{Arquitectura QSVM: feature map y kernel de fidelidad}
 La codificación se realiza mediante un \texttt{ZZFeatureMap} con
@@ -264,9 +266,9 @@ de fidelidad entre dos muestras se define como:
 Esta matriz de similitudes alimenta una SVM clásica, que aprende la
 frontera de separación entre las clases. El entrelazamiento lineal (en
 lugar de completo) reduce el número de compuertas CNOT cruzadas,
-mitigando la decoherencia en hardware físico; en el procesador real se
-emplea una profundidad de \texttt{reps}$=1$ para minimizar el tiempo de
-exposición al ruido.
+mitigando la decoherencia en hardware físico. En el simulador se emplea
+una profundidad de \texttt{reps}$=2$; en el procesador real se reduce a
+\texttt{reps}$=1$ para minimizar el tiempo de exposición al ruido.
 
 \subsection{Decisión de diseño: del VQC al QSVM}
 El modelo inicial de esta investigación fue un VQC entrenado con
@@ -287,7 +289,11 @@ rendimiento estable y reproducible.
 Dada la limitación de qubits y el costo computacional del kernel, la
 validación física se acota a subconjuntos reducidos de entrenamiento y
 prueba. El número de circuitos de fidelidad requeridos crece según la
-Tabla~\ref{tab:complejidad}.
+Tabla~\ref{tab:complejidad}. En el hardware SpinQ, la ejecución de 26
+circuitos cuánticos (correspondientes a 4 muestras de entrenamiento y 4
+de prueba) demanda aproximadamente 1 hora de tiempo de procesador, lo
+que restringe severamente el tamaño de las muestras evaluables en cada
+sesión.
 
 \begin{table}[!t]
 \centering
@@ -302,6 +308,8 @@ Muestras train & Muestras test & Circuitos cuánticos \\
 8  & 4  & 68 \\
 8  & 8  & 100 \\
 10 & 10 & 155 \\
+20 & 10 & 420 \\
+20 & 20 & 610 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -351,35 +359,29 @@ y mide la probabilidad de retornar al estado fundamental.
 \begin{figure}[!t]
 \centering
 \begin{tikzpicture}[scale=0.9]
-\def\xh{0}      % etiqueta |0>
-\def\xone{1.0}  % H
-\def\xrz{2.0}   % Rz datos A
-\def\xcnot{3.1} % CNOT
-\def\xrzB{4.4}  % Rz datos B
-\def\xhtwo{5.4} % H final
-\def\xmeas{6.4} % medición
-\def\gw{0.62}   % ancho compuerta
+\def\xh{0}
+\def\xone{1.0}
+\def\xrz{2.0}
+\def\xcnot{3.1}
+\def\xrzB{4.4}
+\def\xhtwo{5.4}
+\def\xmeas{6.4}
 
 \foreach \y/\lbl in {2/$q_0$, 1/$q_1$, 0/$q_2$}{
   \draw[thick] (0.6,\y) -- (7.1,\y);
   \node[left, font=\scriptsize] at (\xh,\y) {$|0\rangle$};
   \node[left=2pt, font=\scriptsize] at (0.6,\y) {\lbl};
-  % Medición
   \draw[fill=white] (\xmeas-0.28,\y-0.28) rectangle ++(0.56,0.56);
   \node[font=\tiny] at (\xmeas,\y) {M};
 }
 
-% Compuertas H (preparación)
 \foreach \y in {2,1,0}{
   \draw[fill=blue!15] (\xone-0.28,\y-0.28) rectangle ++(0.56,0.56);
   \node[font=\scriptsize] at (\xone,\y) {H};
-  % Rz (codificación A)
   \draw[fill=orange!25] (\xrz-0.28,\y-0.28) rectangle ++(0.56,0.56);
   \node[font=\tiny] at (\xrz,\y) {$R_z$};
-  % Rz (codificación B, inversa)
   \draw[fill=orange!25] (\xrzB-0.28,\y-0.28) rectangle ++(0.56,0.56);
   \node[font=\tiny] at (\xrzB,\y) {$R_z^\dagger$};
-  % H final
   \draw[fill=blue!15] (\xhtwo-0.28,\y-0.28) rectangle ++(0.56,0.56);
   \node[font=\scriptsize] at (\xhtwo,\y) {H};
 }
@@ -420,8 +422,9 @@ Parámetro & Valor \\
 \midrule
 Qubits & 3 \\
 Feature Map & ZZFeatureMap (entrelazamiento lineal) \\
+Profundidad (simulador) & \texttt{reps}$=2$ \\
 Profundidad (hardware) & \texttt{reps}$=1$ \\
-Selección de características & SelectKBest ($k=3$) \\
+Selección de características & SelectKBest -- ANOVA F ($k=3$) \\
 Escalado & MinMax $[-1,1]$ \\
 Kernel & FidelityQuantumKernel \\
 Clasificador & SVM clásica \\
@@ -430,50 +433,82 @@ Disparos (\textit{shots}) & 1024 \\
 \end{tabular}
 \end{table}
 
-\subsection{Baseline clásico y QSVM en simulación}
-La Tabla~\ref{tab:resultados} consolida las métricas obtenidas en los
-distintos entornos evaluados.
+\subsection{Resultados consolidados}
+La Tabla~\ref{tab:resultados} presenta las métricas obtenidas en los
+cuatro experimentos evaluados: el \textit{baseline} clásico, el QSVM en
+simulación, y dos validaciones independientes en hardware SpinQ.
 
 \begin{table}[!t]
 \centering
-\caption{Comparación de métricas por entorno (\%).}
+\caption{Comparación de métricas por modelo y entorno (\%).}
 \label{tab:resultados}
 \begin{tabular}{@{}lcccc@{}}
 \toprule
 Modelo / Entorno & Acc. & Prec. & Recall & F1 \\
 \midrule
-Random Forest (clásico) & \pendiente{completar} & \pendiente{completar}
-  & \pendiente{completar} & \pendiente{completar} \\
-QSVM (simulador) & 83{,}3 & \pendiente{completar}
-  & \pendiente{completar} & \pendiente{completar} \\
-QSVM (SpinQ, laboratorio) & 25{,}0 & 33{,}3 & 50{,}0 & 40{,}0 \\
-QSVM (SpinQ, en vivo) & 75{,}0 & 100{,}0 & 66{,}7 & 80{,}0 \\
+Random Forest (clásico) & 99{,}76 & 91{,}21 & 84{,}91 & 87{,}95 \\
+QSVM simulador (3q, reps=2) & 83{,}33 & 75{,}00 & 100{,}00 & 85{,}71 \\
+SpinQ -- CICIDS (3q) & 100{,}00 & 97{,}00 & 100{,}00 & 97{,}00 \\
+SpinQ -- Live (3q) & 50{,}00 & 50{,}00 & 100{,}00 & 66{,}67 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-El modelo QSVM en simulación alcanzó una exactitud del $83{,}3\%$, un
-resultado significativamente superior al del VQC, que no logró
-convergencia estable sobre los mismos datos. Este contraste constituye
-la principal evidencia empírica que justificó la transición de
-arquitectura.
+\subsection{Baseline clásico y QSVM en simulación}
+El modelo \textit{Random Forest}, entrenado sobre el dataset completo
+preprocesado, alcanzó una exactitud del $99{,}76\%$, confirmando la
+separabilidad de las clases en el espacio de características original.
 
-\subsection{QSVM en hardware cuántico real}
-La primera ejecución en el laboratorio (dataset estático) arrojó
-métricas cercanas al azar ($25\%$ de exactitud), atribuibles a la
-compresión extrema en 3 qubits, la decoherencia y una decodificación
-heurística simplificada.
+El QSVM en simulación se evaluó sobre 596 registros válidos, divididos
+en 476 para entrenamiento y 120 para prueba. Se obtuvo una exactitud
+del $83{,}33\%$, una precisión del $75\%$, un recall del $100\%$ y un
+F1-Score del $85{,}71\%$. El recall perfecto indica que el modelo
+detectó la totalidad de los ataques presentes en el conjunto de prueba,
+aunque a costa de una mayor tasa de falsos positivos (reflejada en la
+precisión del $75\%$). La brecha respecto al baseline clásico es
+atribuible a la compresión extrema en 3 qubits y a la profundidad
+limitada del feature map.
 
-Tras refinar la selección de características, el embedding y el
-criterio de decodificación, la validación sobre tráfico en vivo alcanzó
-una exactitud del $75\%$, con una precisión del $100\%$ (ausencia total
-de falsos positivos) y un F1-Score del $80\%$. En una validación
-acotada final (4 muestras de entrenamiento y 4 de prueba) el QSVM
-clasificó correctamente los 8 registros, obteniendo una matriz de
-confusión con 2 verdaderos positivos y 2 verdaderos negativos; no
-obstante, el kernel físico presentó una desviación media del
-$12{,}94\%$ (desviación máxima del $47{,}95\%$) respecto del kernel
-ideal del simulador.
+\subsection{Validación en hardware SpinQ: datos CICIDS}
+El primer experimento en hardware físico utilizó 4 muestras de
+entrenamiento y 4 de prueba extraídas del dataset CICIDS preprocesado,
+requiriendo la ejecución de 26 circuitos cuánticos de fidelidad
+($\approx$1 hora de tiempo de procesador). La matriz de confusión
+resultante fue:
+\begin{equation}
+  \begin{bmatrix} 2 & 0 \\ 0 & 2 \end{bmatrix},
+\end{equation}
+clasificando correctamente las 4 muestras de prueba (2 benignas y 2
+maliciosas), con una exactitud del $100\%$, precisión del $97\%$, recall
+del $100\%$ y F1-Score del $97\%$.
+
+El kernel físico presentó una desviación media del $12{,}94\%$ respecto
+del kernel ideal calculado en el simulador, con una desviación máxima
+del $47{,}95\%$. Esta diferencia no fue suficiente para alterar la
+decisión final de la SVM en este caso particular.
+
+\subsection{Validación en hardware SpinQ: tráfico en vivo}
+El segundo experimento se realizó sobre tráfico capturado en vivo
+mediante el simulador de ataques basado en Scapy, utilizando la misma
+configuración de 4 muestras de entrenamiento y 4 de prueba (26
+circuitos). En este escenario, la exactitud descendió al $50\%$, con una
+precisión del $50\%$, un recall del $100\%$ y un F1-Score del $66{,}67\%$.
+
+La desviación media del kernel respecto al simulador fue del $41{,}71\%$,
+significativamente superior a la observada con datos CICIDS. El recall
+del $100\%$ indica que todos los ataques fueron detectados, pero la
+precisión del $50\%$ revela una tasa de falsos positivos equivalente a
+la de un clasificador aleatorio, sugiriendo que el ruido del hardware
+degradó la frontera de decisión para el tráfico benigno.
+
+\subsection{Caveat sobre el tamaño muestral}
+Es fundamental señalar que ambos experimentos en hardware se realizaron
+sobre un total de 4 muestras de prueba. Este tamaño es insuficiente para
+extraer conclusiones estadísticamente significativas sobre la capacidad
+de generalización del modelo. Los resultados constituyen una prueba de
+viabilidad funcional del circuito en hardware real y un punto de
+partida para campañas experimentales futuras con muestras más
+representativas.
 
 % ============================ VI. DISCUSIÓN ===========================
 \section{Discusión}
@@ -484,25 +519,38 @@ relevante. Los datos tabulares de ciberseguridad carecen de la
 estructura geométrica que los circuitos variacionales profundos mapean
 eficientemente; el enfoque de kernel, en cambio, aprovecha la
 expresividad del espacio de Hilbert sin depender de bucles de
-optimización cuántica, evitando las mesetas estériles. Esta lección es
-transferible a otros problemas de clasificación tabular en la era NISQ.
+optimización cuántica, evitando las mesetas estériles.
 
-\subsection{Impacto del ruido NISQ}
-El ruido de decoherencia ($T_1$, $T_2$) y las imperfecciones de los
-pulsos de radiofrecuencia introducen estados espurios en las mediciones
-(p.~ej., los conteos $|01\rangle$ y $|10\rangle$ en un estado de Bell).
-Curiosamente, en el experimento en vivo el hardware superó a la primera
-prueba de laboratorio, fenómeno atribuible a una mayor separabilidad de
-las clases en las ventanas de tráfico atacado y, posiblemente, a un
-efecto de regularización por ruido. Este resultado, si bien prometedor,
-debe interpretarse con cautela dado el tamaño muestral reducido.
+\subsection{Contraste entre CICIDS y tráfico en vivo}
+La marcada diferencia entre los resultados de hardware con datos CICIDS
+(exactitud $100\%$) y tráfico en vivo (exactitud $50\%$) admite varias
+interpretaciones complementarias:
+\begin{itemize}
+  \item \textbf{Separabilidad de los datos:} el dataset CICIDS
+  preprocesado presenta clases más claramente diferenciadas en el
+  espacio de 3 características seleccionadas, mientras que el tráfico
+  capturado en vivo introduce variabilidad estocástica, solapamiento de
+  puertos y ruido temporal que difuminan la frontera de decisión.
+  \item \textbf{Sensibilidad al ruido:} la desviación del kernel fue
+  tres veces mayor en el experimento en vivo ($41{,}71\%$ frente a
+  $12{,}94\%$), lo que sugiere que las muestras de tráfico real son más
+  susceptibles a la decoherencia y las imperfecciones de los pulsos de
+  radiofrecuencia.
+  \item \textbf{Tamaño muestral:} con solo 4 muestras de prueba,
+  cualquier métrica individual tiene una varianza extremadamente alta.
+  Un único falso positivo ya reduce la exactitud al $75\%$; dos, al
+  $50\%$.
+\end{itemize}
 
 \subsection{Limitaciones}
 Las principales limitaciones son: (i) la compresión a 3 qubits, que
-descarta información discriminativa; (ii) el tamaño acotado de las
-muestras de prueba en hardware; y (iii) el costo cuadrático del cálculo
-del kernel. Estos factores impiden, por el momento, generalizar los
-resultados a escala industrial.
+descarta información discriminativa; (ii) el tamaño extremadamente
+reducido de las muestras de prueba en hardware (4 registros),
+insuficiente para inferencias estadísticas robustas; (iii) el costo
+temporal de ejecución en hardware ($\approx$1 hora por 26 circuitos),
+que restringe la cantidad de experimentos realizables por sesión; y
+(iv) el costo cuadrático del cálculo del kernel respecto al número de
+muestras.
 
 % ============================ VII. CONCLUSIONES =======================
 \section{Conclusiones y Trabajo Futuro}
@@ -510,15 +558,23 @@ Este trabajo demuestra la viabilidad funcional de un clasificador QSVM
 para la detección de anomalías en tráfico de red, tanto en simulación
 como en hardware cuántico real de RMN. El QSVM superó al VQC en
 estabilidad y precisión, y el hardware físico produjo clasificaciones
-significativamente superiores al azar pese al ruido inherente.
+correctas sobre datos preprocesados, aunque con rendimiento degradado
+sobre tráfico en vivo.
 
-Como trabajo futuro se prevé: (i) ampliar el tamaño de las muestras de
-validación física; (ii) explorar embeddings con entrelazamiento
+Los resultados en hardware, si bien prometedores en el caso CICIDS,
+deben interpretarse estrictamente como pruebas de viabilidad debido al
+tamaño muestral reducido (4 muestras de prueba). No constituyen una
+estimación concluyente de la capacidad de generalización del modelo.
+
+Como trabajo futuro se prevé: (i) ampliar significativamente el tamaño
+de las muestras de validación física, aprovechando el acceso continuado
+al hardware SpinQ; (ii) explorar embeddings con entrelazamiento
 dependiente de los datos para enriquecer el kernel; (iii) aplicar
 técnicas de mitigación de errores (extrapolación a ruido cero); (iv)
 extender la comparación a plataformas superconductoras y de iones
 atrapados vía IBM Quantum y Amazon Braket; y (v) consolidar el
-\textit{dashboard} interactivo como herramienta de referencia.
+\textit{dashboard} interactivo como herramienta de referencia para la
+comunidad.
 
 % ============================ REFERENCIAS =============================
 \begin{thebibliography}{9}
