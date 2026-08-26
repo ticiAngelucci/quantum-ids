@@ -37,22 +37,35 @@ def main() -> None:
         "journey_radio",
         st.session_state.get("current_step", "1. Resumen"),
     )
-    spinq_is_active = (
+    fixed_three_qubit_hardware_is_active = (
         active_step == "2. Experimentar"
-        and st.session_state.get("quantum_execution_target_radio") == "spinq"
+        and st.session_state.get("quantum_execution_target_radio")
+        in {"spinq", "ibm_quantum"}
     ) or (
         active_step == "3. Live"
-        and st.session_state.get("live_quantum_execution_target") == "spinq"
+        and st.session_state.get("live_quantum_execution_target")
+        in {"spinq", "ibm_quantum"}
     )
-    if spinq_is_active:
+    if fixed_three_qubit_hardware_is_active:
         selected_quantum_qubits = 3
         st.session_state["selected_quantum_qubits"] = 3
         st.session_state["quantum_results_selectbox"] = 3
     selected_quantum_dataset_source = st.session_state.get("selected_quantum_dataset_source", "cicids")
+    if active_step == "3. Live":
+        selected_quantum_execution_target = st.session_state.get(
+            "live_quantum_execution_target",
+            "simulator",
+        )
+    else:
+        selected_quantum_execution_target = st.session_state.get(
+            "quantum_execution_target_radio",
+            "simulator",
+        )
 
     model_data = get_model_data(
         selected_quantum_qubits=selected_quantum_qubits,
         selected_quantum_dataset_source=selected_quantum_dataset_source,
+        selected_quantum_execution_target=selected_quantum_execution_target,
     )
 
     selection: SidebarSelection = render_sidebar_controls(

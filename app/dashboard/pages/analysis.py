@@ -1,219 +1,456 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
 import streamlit as st
 
-from dashboard.analytics import (
-    build_metrics_dataframe,
-    build_quantum_runs_dataframe,
-    make_global_comparison_chart,
-    make_noise_chart,
-    make_time_chart,
+from dashboard.constants import (
+    CLASSICAL_RESULTS_PATH,
+    QUANTUM_HARDWARE_RESULTS_PATH,
+    QUANTUM_IBM_HARDWARE_RESULTS_PATH,
+    QUANTUM_LIVE_HARDWARE_RESULTS_PATH,
+    QUANTUM_LIVE_IBM_HARDWARE_RESULTS_PATH,
 )
 from dashboard.types import ModelData
 from dashboard.ui import render_info_card, render_spotlight_panel
 
 
-def render_analysis_tab(model_data: ModelData, selected_model: str, selected_quantum_dataset_source: str) -> None:
+def _load_json(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _metric(payload: dict[str, Any] | None, name: str) -> float | None:
+    if not payload:
+        return None
+    value = payload.get("metrics", {}).get(name)
+    return float(value) if value is not None else None
+
+
+def _format_percent(value: float | None) -> str:
+    return f"{value:.2%}" if value is not None else "n/d"
+
+
+def _format_seconds(value: Any) -> str:
+    return f"{float(value):.2f} s" if value is not None else "n/d"
+
+
+def _hardware_evidence_row(
+    *,
+    label: str,
+    dataset: str,
+    path: Path,
+    expected_target: str,
+) -> dict[str, str]:
+    payload = _load_json(path)
+    if not payload or payload.get("execution_target") != expected_target:
+        return {
+            "Enfoque": label,
+            "Dataset": dataset,
+            "Estado": "Pendiente",
+            "Backend": "n/d",
+            "Cohorte train/test": "4 / 4 planificada",
+            "Carga ejecutada": "10 train + 16 prueba = 26 circuitos",
+            "Accuracy": "n/d",
+            "Precision": "n/d",
+            "Recall": "n/d",
+            "F1": "n/d",
+            "Tiempo / uso": "n/d",
+            "Evidencia": path.name,
+        }
+
+    train_samples = payload.get("train_sample_size", 4)
+    test_samples = payload.get("sample_size", payload.get("rows", 4))
+    train_circuits = payload.get("train_circuit_count", 10)
+    test_circuits = payload.get("test_circuit_count", 16)
+    total_circuits = payload.get(
+        "circuit_count",
+        int(train_circuits) + int(test_circuits),
+    )
+    if expected_target == "ibm_quantum":
+        backend = str(payload.get("ibm_backend_name") or "IBM Quantum")
+        usage = payload.get("ibm_total_usage_seconds")
+        timing = f"{_format_seconds(payload.get('execution_time_seconds'))} / "
+        timing += f"{_format_seconds(usage)} QPU"
+    else:
+        backend = "SpinQ Triangulum"
+        timing = _format_seconds(payload.get("execution_time_seconds"))
+
+    return {
+        "Enfoque": label,
+        "Dataset": dataset,
+        "Estado": "Ejecutado",
+        "Backend": backend,
+        "Cohorte train/test": f"{train_samples} / {test_samples}",
+        "Carga ejecutada": (
+            f"{train_circuits} train + {test_circuits} prueba = "
+            f"{total_circuits} circuitos"
+        ),
+        "Accuracy": _format_percent(_metric(payload, "accuracy")),
+        "Precision": _format_percent(_metric(payload, "precision")),
+        "Recall": _format_percent(_metric(payload, "recall")),
+        "F1": _format_percent(_metric(payload, "f1_score")),
+        "Tiempo / uso": timing,
+        "Evidencia": path.name,
+    }
+
+
+def _local_simulator_row(dataset_source: str) -> dict[str, str]:
+    dataset_label = "Live" if dataset_source == "live" else "CICIDS2017"
+    session_payload = st.session_state.get("quantum_lab_results")
+    session_source = st.session_state.get("quantum_lab_results_source")
+    is_current_qsvm = (
+        isinstance(session_payload, dict)
+        and session_payload.get("execution_target") == "simulator"
+        and session_source == dataset_source
+    )
+
+    if dataset_source == "live":
+        default_cohort = "400 / 100 máximo"
+        default_load = "79.800 train + 40.000 prueba = 119.800 circuitos"
+    else:
+        default_cohort = "480 / 120 default"
+        default_load = "114.960 train + 57.600 prueba = 172.560 circuitos"
+
+    if not is_current_qsvm:
+        return {
+            "Enfoque": "QSVM local",
+            "Dataset": dataset_label,
+            "Estado": "Implementado; sin JSON QSVM vigente",
+            "Backend": "Qiskit local ideal",
+            "Cohorte train/test": default_cohort,
+            "Carga ejecutada": default_load,
+            "Accuracy": "n/d",
+            "Precision": "n/d",
+            "Recall": "n/d",
+            "F1": "n/d",
+            "Tiempo / uso": "n/d",
+            "Evidencia": "Resultado de sesión pendiente",
+        }
+
+    train_samples = session_payload.get("train_sample_size", "n/d")
+    test_samples = session_payload.get("sample_size", session_payload.get("rows", "n/d"))
+    train_circuits = session_payload.get("train_circuit_count")
+    test_circuits = session_payload.get("test_circuit_count")
+    load = (
+        f"{train_circuits} train + {test_circuits} prueba = "
+        f"{int(train_circuits) + int(test_circuits)} circuitos"
+        if train_circuits is not None and test_circuits is not None
+        else default_load
+    )
+    return {
+        "Enfoque": "QSVM local",
+        "Dataset": dataset_label,
+        "Estado": "Ejecutado en sesión",
+        "Backend": "Qiskit local ideal",
+        "Cohorte train/test": f"{train_samples} / {test_samples}",
+        "Carga ejecutada": load,
+        "Accuracy": _format_percent(_metric(session_payload, "accuracy")),
+        "Precision": _format_percent(_metric(session_payload, "precision")),
+        "Recall": _format_percent(_metric(session_payload, "recall")),
+        "F1": _format_percent(_metric(session_payload, "f1_score")),
+        "Tiempo / uso": _format_seconds(session_payload.get("execution_time_seconds")),
+        "Evidencia": "Sesión Streamlit; no persistida",
+    }
+
+
+def _classical_row(model_data: ModelData) -> dict[str, str]:
+    classical = model_data["Modelo clasico"]
+    is_real = classical.get("source") == "real"
+    return {
+        "Enfoque": "Random Forest",
+        "Dataset": "CICIDS2017",
+        "Estado": "Ejecutado" if is_real else "Pendiente",
+        "Backend": "CPU",
+        "Cohorte train/test": "152.728 / 38.183",
+        "Carga ejecutada": "190.911 muestras válidas",
+        "Accuracy": _format_percent(float(classical["accuracy"])) if is_real else "n/d",
+        "Precision": _format_percent(float(classical["precision"])) if is_real else "n/d",
+        "Recall": _format_percent(float(classical["recall"])) if is_real else "n/d",
+        "F1": _format_percent(float(classical["f1_score"])) if is_real else "n/d",
+        "Tiempo / uso": "No registrado en el JSON",
+        "Evidencia": CLASSICAL_RESULTS_PATH.name,
+    }
+
+
+def _selected_hardware_payloads(dataset_source: str) -> tuple[dict | None, dict | None]:
+    if dataset_source == "live":
+        return (
+            _load_json(QUANTUM_LIVE_IBM_HARDWARE_RESULTS_PATH),
+            _load_json(QUANTUM_LIVE_HARDWARE_RESULTS_PATH),
+        )
+    return (
+        _load_json(QUANTUM_IBM_HARDWARE_RESULTS_PATH),
+        _load_json(QUANTUM_HARDWARE_RESULTS_PATH),
+    )
+
+
+def render_analysis_tab(
+    model_data: ModelData,
+    selected_model: str,
+    selected_quantum_dataset_source: str,
+) -> None:
+    dataset_label = (
+        "Live" if selected_quantum_dataset_source == "live" else "CICIDS2017"
+    )
+    ibm_payload, spinq_payload = _selected_hardware_payloads(
+        selected_quantum_dataset_source
+    )
+
     st.markdown(
         """
         <div style="padding: 0.5rem 0 1.5rem 0; border-bottom: 2px solid #FDB913; margin-bottom: 2rem;">
-            <span style="color: #FDB913; font-weight: 800; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em;">Tesina de Licenciatura en Sistemas</span>
             <h1 style="margin: 0.3rem 0; font-size: 2.6rem; color: #FFFFFF; font-weight: 900;">Análisis y Síntesis</h1>
-            <p style="color: #A0B3C6; margin: 0; font-size: 1.1rem; line-height: 1.5;">
-                Lectura integrada de los resultados experimentales del IDS: rendimiento predictivo, costo temporal,
-                estabilidad, efecto del ruido y alcance actual del hardware cuántico. Esta sección conecta la
-                evidencia técnica con las conclusiones centrales de la investigación.
-            </p>
         </div>
         """,
         unsafe_allow_html=True,
     )
-    quantum_source_label = model_data["Modelo cuantico"].get("dataset_source_label", "CICIDS2017")
+
     render_spotlight_panel(
-        "Lectura comparativa",
-        "Como conviene leer estos resultados",
-        "Primero compará la brecha entre clasico y cuantico. Despues mirá si esa diferencia cambia cuando variás qubits, cuando pasás a live o cuando aparece hardware real. Esa secuencia ayuda a separar si el cuello está en el dataset, en el circuito o en el ruido del backend.",
-        meta=[
-            ("Enfoque activo", model_data[selected_model]["short_label"]),
-            ("Corrida cuantica", quantum_source_label),
-            ("Qubits", str(model_data["Modelo cuantico"]["selected_qubits"])),
-        ],
+        "Conclusión de la auditoría",
+        "El modelo cuántico actual es un Quantum Kernel (QSVM)",
+        (
+            "El circuito calcula fidelidades entre muestras y genera una matriz de kernel. "
+            "La clasificación final se realiza con una SVM clásica de kernel precomputado. "
+            "No existen ansatz entrenable, optimizador variacional ni fine-tuning en hardware."
+        ),
     )
 
-    st.markdown("#### Rendimiento comparado")
-    if model_data["Modelo cuantico"]["source"] != "real":
-        command = (
-            f"python -m src.quantum.train_vqc_simulator --dataset-source live --qubits {model_data['Modelo cuantico']['selected_qubits']}"
-            if selected_quantum_dataset_source == "live"
-            else f"python -m src.quantum.train_vqc_simulator --qubits {model_data['Modelo cuantico']['selected_qubits']}"
-        )
-        st.info(
-            f"Todavia no se entreno el VQC {'live' if selected_quantum_dataset_source == 'live' else 'CICIDS'} "
-            f"con {model_data['Modelo cuantico']['selected_qubits']} qubits. Ejecutar: {command}"
-        )
-
-    table_df = build_metrics_dataframe(model_data).pivot(index="Modelo", columns="Metrica", values="Valor")
-    table_df = table_df[["Accuracy", "Precision", "Recall", "F1-Score"]]
-    summary_left, summary_right = st.columns([1.25, 1])
-    with summary_left:
-        st.plotly_chart(make_global_comparison_chart(model_data, height=380), width="stretch", key="analysis_global_comparison_chart")
-    with summary_right:
-        st.dataframe(table_df.style.format("{:.1%}"), width="stretch")
-        st.caption(
-            f"El clasico muestra su referencia real. El bloque cuantico refleja la corrida "
-            f"{quantum_source_label} de {model_data['Modelo cuantico']['selected_qubits']} qubits si existe un resultado guardado."
-        )
+    st.write("")
+    st.markdown("### Carga experimental predeterminada")
+    st.caption(
+        "Desglose de entrenamiento y prueba. En el clásico se cuentan muestras; "
+        "en el QSVM se cuentan circuitos lógicos de fidelidad."
+    )
+    workload_df = pd.DataFrame(
+        [
+            {
+                "Caso": "Random Forest",
+                "Cohorte": "152.728 train / 38.183 prueba",
+                "Entrenamiento": "152.728 muestras",
+                "Prueba": "38.183 muestras",
+                "Total": "190.911 muestras",
+                "Motivo": "Split clásico 80/20 después de limpiar CICIDS2017.",
+            },
+            {
+                "Caso": "QSVM local CICIDS",
+                "Cohorte": "480 train / 120 prueba",
+                "Entrenamiento": "114.960 circuitos",
+                "Prueba": "57.600 circuitos",
+                "Total": "172.560 circuitos",
+                "Motivo": "Triángulo sin diagonal n(n−1)/2 y kernel cruzado m·n.",
+            },
+            {
+                "Caso": "QSVM local Live",
+                "Cohorte": "400 train / 100 prueba (máximo)",
+                "Entrenamiento": "79.800 circuitos",
+                "Prueba": "40.000 circuitos",
+                "Total": "119.800 circuitos",
+                "Motivo": "Máximo default de 250 muestras por clase y split 80/20.",
+            },
+            {
+                "Caso": "SpinQ · CICIDS2017",
+                "Cohorte": "4 train / 4 prueba",
+                "Entrenamiento": "10 circuitos",
+                "Prueba": "16 circuitos",
+                "Total": "26 circuitos",
+                "Motivo": "Cohorte CICIDS reducida para limitar el uso del hardware NMR.",
+            },
+            {
+                "Caso": "SpinQ · Live",
+                "Cohorte": "4 train / 4 prueba",
+                "Entrenamiento": "10 circuitos",
+                "Prueba": "16 circuitos",
+                "Total": "26 circuitos",
+                "Motivo": "Cohorte Live reducida para limitar el uso del hardware NMR.",
+            },
+            {
+                "Caso": "IBM Quantum · CICIDS2017",
+                "Cohorte": "4 train / 4 prueba",
+                "Entrenamiento": "10 circuitos",
+                "Prueba": "16 circuitos",
+                "Total": "26 circuitos · 2 jobs",
+                "Motivo": "Cohorte CICIDS equivalente a SpinQ y consumo QPU acotado.",
+            },
+            {
+                "Caso": "IBM Quantum · Live",
+                "Cohorte": "4 train / 4 prueba",
+                "Entrenamiento": "10 circuitos",
+                "Prueba": "16 circuitos",
+                "Total": "26 circuitos · 2 jobs",
+                "Motivo": "Cohorte Live equivalente a SpinQ y consumo QPU acotado.",
+            },
+        ]
+    )
+    st.dataframe(workload_df, hide_index=True, width="stretch")
+    st.caption(
+        "Los shots son repeticiones de medición de cada circuito; no aumentan la "
+        "cantidad de circuitos lógicos indicada en la tabla."
+    )
 
     st.write("")
-    st.markdown("#### Corridas VQC disponibles")
-    quantum_runs_df = build_quantum_runs_dataframe(dataset_source=selected_quantum_dataset_source)
-    trained_runs = quantum_runs_df[quantum_runs_df["Estado"] == "Entrenado"]
-    runs_left, runs_right = st.columns([1.2, 0.9])
-    with runs_left:
-        st.dataframe(
-            quantum_runs_df.style.format(
-                {
-                    "Accuracy": "{:.2%}",
-                    "Precision": "{:.2%}",
-                    "Recall": "{:.2%}",
-                    "F1-Score": "{:.2%}",
-                    "Tiempo (s)": "{:.2f}",
-                    "Sample": "{:.0f}",
-                },
-                na_rep="Sin correr",
-            ),
-            width="stretch",
-        )
-    with runs_right:
-        if not trained_runs.empty:
-            best_row = trained_runs.sort_values(["F1-Score", "Accuracy"], ascending=False).iloc[0]
+    st.markdown("### Evidencia experimental vigente")
+    st.caption(
+        "Las filas se construyen desde los JSON actuales. Los artefactos antiguos que "
+        "declaran Variational Quantum Classifier se excluyen de esta lectura."
+    )
+    evidence_rows = [
+        _classical_row(model_data),
+        _local_simulator_row(selected_quantum_dataset_source),
+        _hardware_evidence_row(
+            label="SpinQ",
+            dataset="CICIDS2017",
+            path=QUANTUM_HARDWARE_RESULTS_PATH,
+            expected_target="spinq",
+        ),
+        _hardware_evidence_row(
+            label="SpinQ",
+            dataset="Live",
+            path=QUANTUM_LIVE_HARDWARE_RESULTS_PATH,
+            expected_target="spinq",
+        ),
+        _hardware_evidence_row(
+            label="IBM Quantum",
+            dataset="CICIDS2017",
+            path=QUANTUM_IBM_HARDWARE_RESULTS_PATH,
+            expected_target="ibm_quantum",
+        ),
+        _hardware_evidence_row(
+            label="IBM Quantum",
+            dataset="Live",
+            path=QUANTUM_LIVE_IBM_HARDWARE_RESULTS_PATH,
+            expected_target="ibm_quantum",
+        ),
+    ]
+    st.dataframe(pd.DataFrame(evidence_rows), hide_index=True, width="stretch")
+    st.warning(
+        "Las métricas físicas se calcularon sobre sólo 4 muestras de prueba. Son "
+        "evidencia de integración y ejecución, no una estimación generalizable del IDS."
+    )
+
+    st.write("")
+    st.markdown(f"### Lectura física seleccionada · {dataset_label}")
+    physical_cols = st.columns(2)
+    with physical_cols[0]:
+        if ibm_payload and ibm_payload.get("execution_target") == "ibm_quantum":
             render_spotlight_panel(
-                "Mejor corrida guardada",
-                f"{int(best_row['Qubits'])} qubits · {best_row['Fuente']}",
-                "Esta es la referencia cuantica mas fuerte disponible en disco para la fuente elegida. Conviene leerla junto con el costo temporal y no solo por accuracy.",
+                "IBM Quantum",
+                str(ibm_payload.get("ibm_backend_name") or "Backend IBM"),
+                (
+                    "Evidencia fuerte de ejecución: backend, timestamps, matrices, "
+                    "identificadores de jobs, uso QPU y diagnósticos quedaron persistidos."
+                ),
                 meta=[
-                    ("F1", f"{best_row['F1-Score']:.2%}"),
-                    ("Accuracy", f"{best_row['Accuracy']:.2%}"),
-                    ("Tiempo", f"{best_row['Tiempo (s)']:.2f}s"),
+                    ("Accuracy", _format_percent(_metric(ibm_payload, "accuracy"))),
+                    ("F1", _format_percent(_metric(ibm_payload, "f1_score"))),
+                    (
+                        "Uso QPU",
+                        _format_seconds(ibm_payload.get("ibm_total_usage_seconds")),
+                    ),
+                ],
+            )
+            noise = ibm_payload.get("quantum_noise", {})
+            st.caption(
+                "Desviación del kernel vs referencia local: "
+                f"media {float(noise.get('mean_absolute_deviation', 0)):.4f} · "
+                f"máxima {float(noise.get('max_absolute_deviation', 0)):.4f}."
+            )
+        else:
+            render_spotlight_panel(
+                "IBM Quantum",
+                "Ejecución pendiente",
+                f"No existe un resultado IBM vigente para {dataset_label}.",
+            )
+
+    with physical_cols[1]:
+        if spinq_payload and spinq_payload.get("execution_target") == "spinq":
+            render_spotlight_panel(
+                "SpinQ",
+                "Triangulum · 3 qubits",
+                (
+                    "El JSON prueba que el pipeline produjo métricas físicas, pero su "
+                    "trazabilidad es menor: no registra task ID de SpinQuasar, timestamp "
+                    "interno ni duración total."
+                ),
+                meta=[
+                    ("Accuracy", _format_percent(_metric(spinq_payload, "accuracy"))),
+                    ("F1", _format_percent(_metric(spinq_payload, "f1_score"))),
+                    ("Circuitos", "10 + 16 = 26"),
                 ],
             )
         else:
             render_spotlight_panel(
-                "Corridas pendientes",
-                "Todavia no hay evidencia cuantica suficiente",
-                "No hay corridas VQC guardadas para esta fuente. Antes de comparar qubits conviene ejecutar al menos una corrida base y una variante para ver si la brecha es estable.",
+                "SpinQ",
+                "Ejecución pendiente",
+                f"No existe un resultado SpinQ vigente para {dataset_label}.",
             )
 
-    st.write("")
-    st.markdown("#### Ruido y limites del hardware")
-    col1, col2 = st.columns([1.35, 1])
-    with col1:
-        st.plotly_chart(make_noise_chart(model_data, height=350), width="stretch", key="analysis_noise_chart")
-    with col2:
-        simulated = model_data["Modelo cuantico"]
-        hardware = model_data["Hardware cuantico real"]
-        render_info_card("Caida de Accuracy", f"{(simulated['accuracy'] - hardware['accuracy']):.1%}", "Perdida al pasar del ideal al hardware real.")
-        st.write("")
-        render_info_card("Caida de F1-Score", f"{(simulated['f1_score'] - hardware['f1_score']):.1%}", "Perdida general al salir del simulador ideal.")
-        st.write("")
-        diagnostics = hardware.get("hardware_diagnostics", {})
-        limitation_flags = diagnostics.get("limitation_flags") or []
-        render_info_card("Backend IBM", str(hardware.get("ibm_backend_name", "Pendiente")), "Procesador cuantico real usado en la validacion IBM.")
-        st.write("")
-        render_info_card("Alertas del hardware", ", ".join(limitation_flags) if limitation_flags else "Sin flags", "Senales resumidas de cola, ruido o conectividad limitada detectadas en el backend.")
-        st.write("")
-        hardware_gap_local = hardware.get("hardware_gap_vs_local_subset", {})
-        if hardware_gap_local:
-            render_info_card(
-                "Caida vs local",
-                f"Acc {hardware_gap_local.get('accuracy_drop', 0):.1%} | F1 {hardware_gap_local.get('f1_drop', 0):.1%}",
-                "Diferencia entre IBM y la misma muestra evaluada localmente con los mismos pesos.",
-            )
-            st.write("")
-        render_info_card("Modelo destacado", model_data[selected_model]["short_label"], "Enfoque activo en la lectura actual del dashboard.")
-        if diagnostics:
-            st.caption(
-                f"T1 medio: {diagnostics.get('avg_t1_us', 'n/d')} us | "
-                f"T2 medio: {diagnostics.get('avg_t2_us', 'n/d')} us | "
-                f"Pending jobs: {diagnostics.get('pending_jobs', 'n/d')}"
-            )
+    st.info(
+        "SpinQuasar no es el clasificador: es la capa de operación y gestión del "
+        "equipo SpinQ. SpinQit construye y compila los circuitos; SpinQuasar recibe "
+        "la tarea por red y controla la ejecución sobre Triangulum; la SVM se entrena "
+        "después, de forma clásica, con la matriz de fidelidades."
+    )
 
     st.write("")
-    st.markdown("#### Costos de tiempo")
-    time_left, time_right = st.columns([1.2, 0.9])
-    with time_left:
-        st.plotly_chart(make_time_chart(model_data, height=350), width="stretch", key="analysis_time_chart")
-    with time_right:
-        render_spotlight_panel(
-            "Costo computacional",
-            "Tiempo vs valor experimental",
-            "El clasico sigue siendo el mas eficiente. El simulador cuantico introduce costo por optimizacion iterativa y el hardware real agrega cola, calibracion y latencia. Por eso la lectura correcta es rendimiento por contexto, no solo velocidad bruta.",
-            meta=[
-                ("Clasico", f"{model_data['Modelo clasico']['execution_time']:.1f}s"),
-                ("QML", f"{model_data['Modelo cuantico']['execution_time']:.1f}s"),
-                ("Hardware", f"{model_data['Hardware cuantico real']['execution_time']:.1f}s"),
-            ],
+    st.markdown("### Limitaciones que condicionan la interpretación")
+    limitations_left, limitations_right = st.columns(2)
+    with limitations_left:
+        st.markdown(
+            """
+- **Muestra física mínima:** 4 train y 4 test; la accuracy cambia en saltos de 25 puntos porcentuales.
+- **No hay ventaja cuántica demostrada:** el objetivo logrado es validar el pipeline híbrido sobre hardware real.
+- **Comparación no pareada:** los JSON no guardan índices o hashes de las muestras; IBM y SpinQ no deben presentarse como un head-to-head idéntico.
+- **Prevalidación débil:** actualmente alcanza con detectar al menos un verdadero positivo; no garantiza separar correctamente ambas clases.
+            """
+        )
+    with limitations_right:
+        st.markdown(
+            """
+- **Fuga de información:** RobustScaler y el filtro de correlación se ajustan antes del split train/test.
+- **Historial sobrescribible:** los archivos `latest` y por qubits se reemplazan en corridas posteriores.
+- **SpinQ menos auditable:** no persiste task ID, tiempo, shots ni timestamp; además `spinqit` no está declarado en `requirements.txt`.
+- **Código histórico:** todavía existen módulos y JSON VQC, pero no describen el modelo activo del dashboard.
+            """
         )
 
     st.write("")
     st.markdown("---")
     st.markdown("### Síntesis de la investigación")
-    st.caption(
-        "Conclusiones construidas a partir del contraste entre el baseline clásico, "
-        "la simulación cuántica y la ejecución en hardware real."
-    )
-
+    synthesis_cols = st.columns(3)
     classical = model_data["Modelo clasico"]
-    simulated = model_data["Modelo cuantico"]
-    hardware = model_data["Hardware cuantico real"]
-    accuracy_gap = simulated["accuracy"] - hardware["accuracy"]
-    f1_gap = simulated["f1_score"] - hardware["f1_score"]
-
-    conclusion_cols = st.columns(3)
-    with conclusion_cols[0]:
-        st.markdown(
-            f"""
-            <div style="background: rgba(10, 30, 64, 0.85); border: 1px solid rgba(253, 185, 19, 0.3); border-radius: 14px; padding: 1.4rem; height: 100%;">
-                <span style="color: #FDB913; font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em;">Hallazgo 01</span>
-                <h4 style="color: #FFFFFF; margin: 0.35rem 0 0.7rem 0;">Baseline operativo</h4>
-                <p style="color: #C8D6E5; font-size: 0.92rem; line-height: 1.5; margin: 0;">
-                    Random Forest conserva la referencia más madura para despliegue: alcanza
-                    <b>{classical['accuracy']:.1%} de accuracy</b> y <b>{classical['f1_score']:.1%} de F1</b>,
-                    con menor costo computacional y una operación más estable.
-                </p>
-            </div>
-            """,
-            unsafe_allow_html=True,
+    with synthesis_cols[0]:
+        render_info_card(
+            "Baseline clásico",
+            f"Acc {float(classical['accuracy']):.2%} · F1 {float(classical['f1_score']):.2%}",
+            (
+                "Random Forest continúa siendo la referencia operativa por escala, "
+                "estabilidad y desempeño sobre CICIDS2017."
+            ),
         )
-    with conclusion_cols[1]:
-        st.markdown(
-            f"""
-            <div style="background: rgba(10, 30, 64, 0.85); border: 1px solid rgba(253, 185, 19, 0.3); border-radius: 14px; padding: 1.4rem; height: 100%;">
-                <span style="color: #FDB913; font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em;">Hallazgo 02</span>
-                <h4 style="color: #FFFFFF; margin: 0.35rem 0 0.7rem 0;">Valor experimental del QSVM</h4>
-                <p style="color: #C8D6E5; font-size: 0.92rem; line-height: 1.5; margin: 0;">
-                    El kernel cuántico constituye una línea experimental verificable: la corrida disponible registra
-                    <b>{simulated['accuracy']:.1%} de accuracy</b>. Su aporte actual es explorar representaciones y
-                    correlaciones alternativas, no reemplazar anticipadamente al baseline clásico.
-                </p>
-            </div>
-            """,
-            unsafe_allow_html=True,
+    with synthesis_cols[1]:
+        render_info_card(
+            "Contribución cuántica",
+            "Pipeline QSVM verificable",
+            (
+                "Se implementó el mismo principio de fidelidad en simulador local, "
+                "SpinQ e IBM, seguido por una SVM clásica."
+            ),
         )
-    with conclusion_cols[2]:
-        st.markdown(
-            f"""
-            <div style="background: rgba(10, 30, 64, 0.85); border: 1px solid rgba(253, 185, 19, 0.3); border-radius: 14px; padding: 1.4rem; height: 100%;">
-                <span style="color: #FDB913; font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em;">Hallazgo 03</span>
-                <h4 style="color: #FFFFFF; margin: 0.35rem 0 0.7rem 0;">Brecha de hardware</h4>
-                <p style="color: #C8D6E5; font-size: 0.92rem; line-height: 1.5; margin: 0;">
-                    La ejecución física permite medir el costo de abandonar el entorno ideal. La brecha observada es de
-                    <b>{accuracy_gap:.1%} en accuracy</b> y <b>{f1_gap:.1%} en F1</b>; debe interpretarse junto con ruido,
-                    shots, latencia y tamaño de muestra.
-                </p>
-            </div>
-            """,
-            unsafe_allow_html=True,
+    with synthesis_cols[2]:
+        render_info_card(
+            "Alcance demostrado",
+            "Integración, no superioridad",
+            (
+                "La evidencia demuestra ejecución física y medición de ruido; no "
+                "respalda superioridad predictiva ni ventaja cuántica."
+            ),
         )
 
     st.write("")
@@ -222,11 +459,11 @@ def render_analysis_tab(model_data: ModelData, selected_model: str, selected_qua
         <div style="background: rgba(10, 30, 64, 0.65); border-left: 4px solid #FDB913; padding: 1rem 1.25rem; border-radius: 0 10px 10px 0;">
             <p style="color: #FFFFFF; font-weight: 800; margin: 0 0 0.4rem 0;">Conclusión integradora</p>
             <p style="color: #C8D6E5; font-size: 0.95rem; line-height: 1.55; margin: 0;">
-                La evidencia sostiene una arquitectura híbrida: el modelo clásico funciona como referencia operativa,
-                mientras que el QSVM y la SpinQ permiten estudiar empíricamente el potencial y las restricciones de la
-                computación cuántica aplicada a ciberseguridad. La contribución de la tesina no depende de afirmar una
-                ventaja cuántica inmediata, sino de establecer un pipeline reproducible para compararla bajo las mismas
-                muestras, métricas y condiciones experimentales.
+                La contribución actual de la tesina es una arquitectura híbrida auditable: Random Forest funciona
+                como baseline clásico y el QSVM permite estudiar kernels de fidelidad en un simulador ideal y en
+                dos tecnologías físicas diferentes, IBM Quantum y SpinQ Triangulum. Los resultados físicos validan
+                la integración técnica, pero su cohorte reducida exige presentar las métricas como evidencia
+                exploratoria y no como una demostración de ventaja cuántica.
             </p>
         </div>
         """,
@@ -234,12 +471,7 @@ def render_analysis_tab(model_data: ModelData, selected_model: str, selected_qua
     )
 
     st.markdown("---")
-    st.markdown(
-        """
-        <div style="text-align: center; padding: 1.5rem 0; color: #A0B3C6; font-size: 0.9rem;">
-            <p style="margin: 0; color: #FFFFFF; font-weight: 700;">Quantum IDS · Tesina de Licenciatura en Sistemas</p>
-            <p style="margin: 0.3rem 0 0 0;">Autor: <b>Ticiana Angelucci</b> | Universidad Champagnat | 2026</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    st.caption(
+        "Quantum IDS · Tesina de Licenciatura en Sistemas · "
+        "Síntesis construida desde código y artefactos vigentes."
     )

@@ -92,19 +92,33 @@ def create_ibm_runtime_service():
     QiskitRuntimeService, _, _ = import_ibm_runtime_dependencies()
     token = os.environ.get("IBM_QUANTUM_TOKEN")
     instance = os.environ.get("IBM_QUANTUM_INSTANCE")
+    channel = os.environ.get("IBM_QUANTUM_CHANNEL")
+    account_name = os.environ.get("IBM_QUANTUM_ACCOUNT")
 
     try:
         if token:
-            return QiskitRuntimeService(
-                channel="ibm_quantum_platform",
-                token=token,
-                instance=instance,
-            )
-        return QiskitRuntimeService(channel="ibm_quantum_platform", instance=instance)
+            service_options = {
+                "channel": channel or "ibm_quantum_platform",
+                "token": token,
+            }
+            if instance:
+                service_options["instance"] = instance
+            return QiskitRuntimeService(**service_options)
+
+        service_options = {}
+        if account_name:
+            service_options["name"] = account_name
+        if channel:
+            service_options["channel"] = channel
+        if instance:
+            service_options["instance"] = instance
+        return QiskitRuntimeService(**service_options)
     except Exception as error:
         raise RuntimeError(
             "No se pudo inicializar la cuenta de IBM Quantum. "
-            "Configura IBM_QUANTUM_TOKEN o guarda la cuenta con QiskitRuntimeService.save_account(...)."
+            "Configura IBM_QUANTUM_TOKEN o guarda una cuenta valida con "
+            "QiskitRuntimeService.save_account(...). "
+            f"Detalle de IBM Runtime: {error}"
         ) from error
 
 

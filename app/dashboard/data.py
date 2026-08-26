@@ -13,7 +13,9 @@ from dashboard.constants import (
     MODEL_DATA,
     PCA_PATH,
     QUANTUM_HARDWARE_RESULTS_PATH,
+    QUANTUM_IBM_HARDWARE_RESULTS_PATH,
     QUANTUM_LIVE_HARDWARE_RESULTS_PATH,
+    QUANTUM_LIVE_IBM_HARDWARE_RESULTS_PATH,
     QUANTUM_LIVE_RESULTS_PATH,
     QUANTUM_SIMULATED_RESULTS_PATH,
     RESULTS_DIR,
@@ -74,7 +76,15 @@ def get_quantum_results_path(qubits: int, dataset_source: QuantumDatasetSource =
     return RESULTS_DIR / f"quantum_simulated_metrics_{qubits}q.json"
 
 
-def get_quantum_hardware_results_path(qubits: int, dataset_source: QuantumDatasetSource = "cicids"):
+def get_quantum_hardware_results_path(
+    qubits: int,
+    dataset_source: QuantumDatasetSource = "cicids",
+    execution_target: str = "spinq",
+):
+    if execution_target == "ibm_quantum":
+        if dataset_source == "live":
+            return RESULTS_DIR / f"quantum_live_ibm_hardware_metrics_{qubits}q.json"
+        return RESULTS_DIR / f"quantum_ibm_hardware_metrics_{qubits}q.json"
     if dataset_source == "live":
         return RESULTS_DIR / f"quantum_live_hardware_metrics_{qubits}q.json"
     return RESULTS_DIR / f"quantum_hardware_metrics_{qubits}q.json"
@@ -118,17 +128,30 @@ def load_quantum_simulated_results(
 def load_quantum_hardware_results(
     qubits: int | None = None,
     dataset_source: QuantumDatasetSource = "cicids",
+    execution_target: str = "spinq",
 ) -> dict | None:
-    if qubits is None:
-        results_path = QUANTUM_LIVE_HARDWARE_RESULTS_PATH if dataset_source == "live" else QUANTUM_HARDWARE_RESULTS_PATH
+    if execution_target == "ibm_quantum":
+        latest_results_path = (
+            QUANTUM_LIVE_IBM_HARDWARE_RESULTS_PATH
+            if dataset_source == "live"
+            else QUANTUM_IBM_HARDWARE_RESULTS_PATH
+        )
     else:
-        results_path = get_quantum_hardware_results_path(qubits, dataset_source=dataset_source)
+        latest_results_path = (
+            QUANTUM_LIVE_HARDWARE_RESULTS_PATH
+            if dataset_source == "live"
+            else QUANTUM_HARDWARE_RESULTS_PATH
+        )
+    if qubits is None:
+        results_path = latest_results_path
+    else:
+        results_path = get_quantum_hardware_results_path(
+            qubits,
+            dataset_source=dataset_source,
+            execution_target=execution_target,
+        )
         if not results_path.exists():
-            results_path = (
-                QUANTUM_LIVE_HARDWARE_RESULTS_PATH
-                if dataset_source == "live"
-                else QUANTUM_HARDWARE_RESULTS_PATH
-            )
+            results_path = latest_results_path
     if not results_path.exists():
         return None
     with open(results_path, "r", encoding="utf-8") as results_file:
@@ -142,7 +165,7 @@ def load_quantum_hardware_results(
     if qubits is not None and payload_qubits is not None and payload_qubits != qubits:
         return None
 
-    execution_target = payload.get("execution_target", "ibm")
+    execution_target = payload.get("execution_target", execution_target)
 
     return {
         "accuracy": float(metrics["accuracy"]),
@@ -154,7 +177,7 @@ def load_quantum_hardware_results(
             "model_name",
             "Quantum Kernel (QSVM)"
             if execution_target == "spinq"
-            else "Variational Quantum Classifier",
+            else "Quantum Kernel (QSVM)",
         ),
         "pca_components": payload.get("pca_components"),
         "num_qubits": payload.get("num_qubits"),
@@ -164,6 +187,13 @@ def load_quantum_hardware_results(
         "dataset_path": payload.get("dataset_path"),
         "results_path": str(results_path),
         "ibm_backend_name": payload.get("ibm_backend_name"),
+        "ibm_job_ids": payload.get("ibm_job_ids", []),
+        "ibm_job_usage_seconds": payload.get("ibm_job_usage_seconds", []),
+        "ibm_total_usage_seconds": payload.get("ibm_total_usage_seconds"),
+        "ibm_shots": payload.get("ibm_shots"),
+        "ibm_max_execution_time_seconds_per_job": payload.get(
+            "ibm_max_execution_time_seconds_per_job"
+        ),
         "hardware_diagnostics": payload.get("hardware_diagnostics", {}),
         "hardware_gap_vs_simulator": payload.get("hardware_gap_vs_simulator", {}),
         "hardware_gap_vs_local_subset": payload.get("hardware_gap_vs_local_subset", {}),
@@ -178,6 +208,7 @@ def load_quantum_hardware_results(
 def get_model_data(
     selected_quantum_qubits: int = 4,
     selected_quantum_dataset_source: QuantumDatasetSource = "cicids",
+    selected_quantum_execution_target: str = "spinq",
 ) -> ModelData:
     model_data: ModelData = {
         name: {
@@ -265,6 +296,11 @@ def get_model_data(
     hardware_results = load_quantum_hardware_results(
         selected_quantum_qubits,
         dataset_source=selected_quantum_dataset_source,
+        execution_target=(
+            "ibm_quantum"
+            if selected_quantum_execution_target == "ibm_quantum"
+            else "spinq"
+        ),
     )
     if hardware_results is not None:
         hardware_platform = (
@@ -295,8 +331,22 @@ def get_model_data(
                 "dataset_path": hardware_results["dataset_path"],
                 "results_path": hardware_results["results_path"],
                 "ibm_backend_name": hardware_results.get("ibm_backend_name"),
+                "ibm_job_ids": hardware_results.get("ibm_job_ids", []),
+                "ibm_job_usage_seconds": hardware_results.get(
+                    "ibm_job_usage_seconds", []
+                ),
+                "ibm_total_usage_seconds": hardware_results.get(
+                    "ibm_total_usage_seconds"
+                ),
+                "ibm_shots": hardware_results.get("ibm_shots"),
+                "ibm_max_execution_time_seconds_per_job": hardware_results.get(
+                    "ibm_max_execution_time_seconds_per_job"
+                ),
                 "hardware_diagnostics": hardware_results.get("hardware_diagnostics", {}),
                 "hardware_gap_vs_simulator": hardware_results.get("hardware_gap_vs_simulator", {}),
+                "hardware_gap_vs_local_subset": hardware_results.get(
+                    "hardware_gap_vs_local_subset", {}
+                ),
                 "execution_target": hardware_results.get("execution_target"),
                 "quantum_noise": hardware_results.get("quantum_noise"),
                 "execution_time": hardware_results["execution_time_seconds"]

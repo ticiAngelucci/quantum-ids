@@ -104,7 +104,7 @@ def render_overview_tab(model_data: ModelData, selected_model: str) -> None:
                 <span style="color: #FDB913; font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em;">Contraste 03</span>
                 <h4 style="color: #FFFFFF; font-size: 1.15rem; margin: 0.3rem 0 0.6rem 0;">Infraestructura: Simulación vs. Física</h4>
                 <p style="color: #C8D6E5; font-size: 0.9rem; line-height: 1.45; margin: 0;">
-                    <b>Se compara:</b> El comportamiento de los circuitos ideales ejecutados en un <b>simulador local</b> frente al impacto del ruido real en el <b>hardware físico de Resonancia Magnética Nuclear (SpinQ)</b>.
+                    <b>Se compara:</b> El comportamiento de los circuitos ideales ejecutados en un <b>simulador local</b> frente al impacto del ruido real en <b>IBM Quantum</b> o en el equipo de Resonancia Magnética Nuclear <b>SpinQ</b>.
                 </p>
             </div>
             """,
@@ -132,7 +132,7 @@ def render_overview_tab(model_data: ModelData, selected_model: str) -> None:
     if quantum_lab_results and "metrics" in quantum_lab_results:
         runtime_metrics = quantum_lab_results["metrics"]
         runtime_target = quantum_lab_results.get("execution_target", "simulator")
-        destination = hardware if runtime_target == "spinq" else quantum
+        destination = hardware if runtime_target in {"spinq", "ibm_quantum"} else quantum
         destination.update(
             {
                 "accuracy": runtime_metrics["accuracy"],
@@ -144,12 +144,21 @@ def render_overview_tab(model_data: ModelData, selected_model: str) -> None:
                 ),
                 "source": "real",
                 "source_label": "Resultado real",
+                "execution_target": runtime_target,
             }
         )
-        if runtime_target == "spinq":
+        if runtime_target in {"spinq", "ibm_quantum"}:
             destination["quantum_noise"] = quantum_lab_results.get(
                 "quantum_noise"
             )
+        if runtime_target == "ibm_quantum":
+            destination["ibm_backend_name"] = quantum_lab_results.get(
+                "ibm_backend_name"
+            )
+            destination["ibm_job_ids"] = quantum_lab_results.get(
+                "ibm_job_ids", []
+            )
+            destination["ibm_shots"] = quantum_lab_results.get("ibm_shots")
 
     selected_qubits = quantum_qubits_used
     
@@ -162,6 +171,17 @@ def render_overview_tab(model_data: ModelData, selected_model: str) -> None:
     with comp_cols[1]:
         render_info_card("Enfoque QSVM", f"{quantum['accuracy'] * 100:.2f}% Acc", f"Fidelity Quantum Kernel ({selected_qubits}q)\n\nF1-Score: {quantum['f1_score'] * 100:.2f}%")
     with comp_cols[2]:
+        hardware_target = hardware.get("execution_target")
+        hardware_title = (
+            "Hardware Físico IBM"
+            if hardware_target == "ibm_quantum"
+            else "Hardware Físico RMN"
+        )
+        hardware_platform = (
+            f"IBM Quantum · {hardware.get('ibm_backend_name') or 'backend pendiente'}"
+            if hardware_target == "ibm_quantum"
+            else "SpinQ Triangulum"
+        )
         hardware_noise = hardware.get("quantum_noise") or {}
         hardware_noise_text = (
             f" | Ruido est.: {hardware_noise['mean_absolute_deviation'] * 100:.2f}%"
@@ -169,10 +189,10 @@ def render_overview_tab(model_data: ModelData, selected_model: str) -> None:
             else ""
         )
         render_info_card(
-            "Hardware Físico RMN",
+            hardware_title,
             f"{hardware['accuracy'] * 100:.2f}% Acc",
             (
-                "Validación en SpinQ\n\n"
+                f"Validación en {hardware_platform}\n\n"
                 f"F1-Score: {hardware['f1_score'] * 100:.2f}% | "
                 f"Muestra: {hardware.get('sample_size') or 0} registros"
                 f"{hardware_noise_text}"
@@ -188,7 +208,7 @@ def render_overview_tab(model_data: ModelData, selected_model: str) -> None:
             <p style="color: #E2E8F0; font-size: 0.92rem; margin: 0; line-height: 1.4;">
                 <b>Guía de lectura:</b> Cada bloque vertical agrupa las métricas de evaluación (Accuracy, Precision, Recall y F1-Score).
                 Permite contrastar visualmente la diferencia de rendimiento entre el modelo tabular tradicional, el simulador cuántico ideal 
-                y el desgaste de rendimiento provocado por el ruido térmico en el equipo físico de RMN (SpinQ).
+                y la variación de rendimiento provocada por ruido y muestreo en el hardware cuántico seleccionado.
             </p>
         </div>
         """,

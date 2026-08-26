@@ -36,7 +36,7 @@ python3 -m src.quantum.train_vqc_simulator --dataset-source live --qubits 4
 
 ## 3. Modo IBM Quantum real
 
-Este modo mantiene el mismo pipeline de datos, pero ejecuta el `Sampler` sobre hardware remoto de IBM Quantum usando `qiskit-ibm-runtime`.
+El dashboard ofrece un QSVM físico reducido que replica la lógica usada con SpinQ: selecciona 2 muestras por clase para entrenamiento y 2 por clase para test, construye el mismo feature map H/RZ/CX y envía 26 circuitos de fidelidad mediante `SamplerV2` de IBM Runtime. El clasificador SVC se entrena con la matriz medida por IBM.
 
 Antes de usarlo:
 
@@ -49,6 +49,30 @@ Opcionalmente:
 ```bash
 export IBM_QUANTUM_INSTANCE="tu_instancia"
 ```
+
+También se puede usar una cuenta guardada como predeterminada por Qiskit Runtime:
+
+```python
+from qiskit_ibm_runtime import QiskitRuntimeService
+
+QiskitRuntimeService.save_account(
+    channel="ibm_quantum_platform",
+    token="tu_token",
+    overwrite=True,
+    set_as_default=True,
+)
+```
+
+En `Experimentar` o `Live`, elegí `Hardware Real IBM Quantum`. El backend puede dejarse vacío para seleccionar automáticamente el equipo operativo compatible con menor cola. Cada ejecución registra backend, shots, IDs de jobs, consumo QPU real, diagnósticos, matrices del kernel, tiempos y desviación contra la referencia local. Como protección de cuota, cada uno de los dos jobs tiene un límite duro de 60 segundos de ejecución QPU.
+
+Resultados QSVM IBM separados de SpinQ:
+
+- `results/quantum_ibm_hardware_metrics.json`
+- `results/quantum_ibm_hardware_metrics_{N}q.json`
+- `results/quantum_live_ibm_hardware_metrics.json`
+- `results/quantum_live_ibm_hardware_metrics_{N}q.json`
+
+Las opciones CLI descritas a continuación corresponden al pipeline VQC histórico y se conservan por compatibilidad.
 
 ### Opcion recomendada: entrenamiento local + validacion IBM
 

@@ -14,6 +14,7 @@ from dashboard.analytics import (
 from dashboard.constants import (
     LIVE_CAPTURE_PATH,
     LIVE_TRAINING_DATASET_PATH,
+    QUANTUM_LIVE_IBM_HARDWARE_RESULTS_PATH,
     QUANTUM_LIVE_HARDWARE_RESULTS_PATH,
 )
 from dashboard.types import ModelData
@@ -21,13 +22,13 @@ from dashboard.ui import render_info_card, render_quantum_noise_card
 from src.utils.save_results import save_results
 
 
-def _load_saved_spinq_result(path) -> dict | None:
+def _load_saved_hardware_result(path, execution_target: str) -> dict | None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
     if (
-        payload.get("execution_target") != "spinq"
+        payload.get("execution_target") != execution_target
         or payload.get("pipeline_version") != "qsvm_fidelity_v2"
         or not isinstance(payload.get("metrics"), dict)
         or payload.get("confusion_matrix") is None
@@ -51,8 +52,14 @@ SIMULATOR_CONFIGS = {
 LIVE_DEFAULT_FEATURE_MAP_REPS = 2
 
 
-def _sync_live_spinq_qubits() -> None:
-    if st.session_state.get("live_quantum_execution_target") == "spinq":
+def _sync_live_quantum_target() -> None:
+    st.session_state.pop("quantum_lab_results", None)
+    st.session_state.pop("quantum_lab_results_qubits", None)
+    st.session_state.pop("quantum_lab_results_source", None)
+    if st.session_state.get("live_quantum_execution_target") in {
+        "spinq",
+        "ibm_quantum",
+    }:
         st.session_state["selected_quantum_qubits"] = 3
         st.session_state["quantum_results_selectbox"] = 3
 
@@ -305,7 +312,7 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
             <h1 style="margin: 0.3rem 0; font-size: 2.6rem; color: #FFFFFF; font-weight: 900;">Laboratorio Live</h1>
             <p style="color: #A0B3C6; margin: 0; font-size: 1.1rem; line-height: 1.5;">
                 Captura tráfico de red por ventanas, construye un dataset experimental y evalúa un
-                <b>Quantum Kernel (QSVM)</b> en simulación local o sobre la <b>SpinQ Triangulum</b>.
+                <b>Quantum Kernel (QSVM)</b> en simulación local, IBM Quantum o la <b>SpinQ Triangulum</b>.
             </p>
         </div>
         """,
@@ -342,6 +349,7 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
     st.write("")
     st.markdown("---")
     execute_left, execute_right = st.columns([1.2, 1], gap="large")
+    ibm_shots = 1024
     with execute_left:
         st.markdown(
             """
@@ -350,7 +358,7 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
                 <h3 style="color: #FFFFFF; font-size: 1.3rem; margin: 0.3rem 0 0.8rem 0;">Parámetros del QSVM Live</h3>
                 <p style="color: #C8D6E5; font-size: 0.9rem; line-height: 1.5; margin: 0;">
                     Entrena y evalúa el Quantum Kernel con las ventanas etiquetadas capturadas en esta sección.
-                    Podés comparar el simulador ideal con una validación física acotada en SpinQ.
+                    Podés comparar el simulador ideal con ejecuciones físicas acotadas en IBM o SpinQ.
                 </p>
             </div>
             """,
@@ -363,29 +371,57 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
         )
         live_execution_target = st.radio(
             "Entorno de ejecución cuántica Live",
-            options=["simulator", "ibm_validate", "spinq"],
+            options=["simulator", "ibm_quantum", "spinq"],
             format_func=lambda value: {
                 "simulator": "Simulador Local Qiskit",
-                "ibm_validate": "IBM Quantum (prevalidación acotada)",
+                "ibm_quantum": "Hardware Real IBM Quantum",
                 "spinq": "Hardware Real SpinQ",
             }[value],
             horizontal=True,
             key="live_quantum_execution_target",
             label_visibility="collapsed",
-            on_change=_sync_live_spinq_qubits,
+            on_change=_sync_live_quantum_target,
         )
 
         if (
             live_execution_target == "spinq"
             and "spinq_live_results" not in st.session_state
         ):
-            saved_spinq_result = _load_saved_spinq_result(
-                QUANTUM_LIVE_HARDWARE_RESULTS_PATH
+            saved_spinq_result = _load_saved_hardware_result(
+                QUANTUM_LIVE_HARDWARE_RESULTS_PATH,
+                "spinq",
             )
             if saved_spinq_result:
                 st.session_state["spinq_live_results"] = saved_spinq_result
-        if live_execution_target == "spinq":
+        if live_execution_target in {"spinq", "ibm_quantum"}:
             selected_quantum_qubits = 3
+
+        if live_execution_target == "ibm_quantum":
+            saved_ibm_result = _load_saved_hardware_result(
+                QUANTUM_LIVE_IBM_HARDWARE_RESULTS_PATH,
+                "ibm_quantum",
+            )
+            if (
+                saved_ibm_result
+                and int(saved_ibm_result.get("num_qubits", 0)) == selected_quantum_qubits
+                and saved_ibm_result.get("dataset_source") == "live"
+            ):
+                st.session_state["quantum_lab_results"] = saved_ibm_result
+                st.session_state["quantum_lab_results_qubits"] = selected_quantum_qubits
+                st.session_state["quantum_lab_results_source"] = "live"
+
+            with st.expander("Configuración de IBM Quantum", expanded=False):
+                ibm_shots = st.select_slider(
+                    "Shots por circuito",
+                    options=[1024, 2048, 4096],
+                    value=1024,
+                    key="live_ibm_shots",
+                )
+                st.caption(
+                    "Selecciona automáticamente un backend compatible según tu acceso "
+                    "y disponibilidad. El límite de seguridad es 60 s de QPU por job "
+                    "(2 jobs por corrida)."
+                )
 
         selected_quantum_test_size = st.select_slider(
             "Porción de datos para prueba (Test)",
@@ -406,8 +442,8 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
                 "Ejecutar QSVM Live en SpinQ (26 circuitos)"
                 if live_execution_target == "spinq"
                 else (
-                    f"Prevalidar QSVM Live para IBM ({selected_quantum_qubits}q)"
-                    if live_execution_target == "ibm_validate"
+                    f"Ejecutar QSVM Live en IBM ({selected_quantum_qubits}q, 26 circuitos)"
+                    if live_execution_target == "ibm_quantum"
                     else f"Ejecutar Quantum Kernel Live ({selected_quantum_qubits}q)"
                 )
             ),
@@ -416,7 +452,8 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
             key="run_live_quantum_button",
             disabled=not can_run_live,
         )
-        run_live_quantum = run_live_action and live_execution_target != "spinq"
+        run_live_quantum = run_live_action and live_execution_target == "simulator"
+        run_ibm_live_btn = run_live_action and live_execution_target == "ibm_quantum"
         run_spinq_live_btn = run_live_action and live_execution_target == "spinq"
 
     with execute_right:
@@ -424,8 +461,8 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
             "Evaluación física balanceada de 26 circuitos y 3 qubits."
             if live_execution_target == "spinq"
             else (
-                f"Prevalidación local para IBM, limitada a 16 muestras ({selected_quantum_qubits}q)."
-                if live_execution_target == "ibm_validate"
+                f"Evaluación física balanceada de 26 circuitos ({selected_quantum_qubits}q)."
+                if live_execution_target == "ibm_quantum"
                 else f"Kernel ideal de {selected_quantum_qubits} qubits."
             )
         )
@@ -474,9 +511,6 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
 
                 X_test = dataset_bundle.X_test
                 y_test = dataset_bundle.y_test
-                if live_execution_target == "ibm_validate":
-                    X_test = X_test[:16]
-                    y_test = y_test[:16]
 
                 train_kernel_matrix = quantum_kernel.evaluate(x_vec=dataset_bundle.X_train)
                 test_kernel_matrix = quantum_kernel.evaluate(x_vec=X_test, y_vec=dataset_bundle.X_train)
@@ -497,6 +531,19 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
                     "confusion_matrix": confusion_matrix(y_test, y_pred).tolist(),
                     "sample_size": len(y_test),
                     "rows": len(y_test),
+                    "train_sample_size": len(dataset_bundle.y_train),
+                    "train_circuit_count": (
+                        len(dataset_bundle.y_train)
+                        * (len(dataset_bundle.y_train) - 1)
+                        // 2
+                    ),
+                    "test_circuit_count": len(y_test) * len(dataset_bundle.y_train),
+                    "circuit_count": (
+                        len(dataset_bundle.y_train)
+                        * (len(dataset_bundle.y_train) - 1)
+                        // 2
+                        + len(y_test) * len(dataset_bundle.y_train)
+                    ),
                     "source": "real",
                     "execution_target": live_execution_target,
                 }
@@ -509,6 +556,86 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
         except Exception as error:
             progress_placeholder.empty()
             st.error(f"No pude ejecutar la prueba cuántica live: {error}")
+
+    # ==========================================
+    # IBM Quantum Hardware desde Live
+    # ==========================================
+    if run_ibm_live_btn:
+        ibm_status_placeholder = st.empty()
+        try:
+            from src.preprocessing.quantum_preprocessing import (
+                prepare_quantum_dataset,
+                select_balanced_quantum_subset,
+            )
+            from src.quantum.ibm_qsvm import (
+                persist_ibm_qsvm_results,
+                run_ibm_qsvm_hardware_evaluation,
+            )
+
+            ibm_status_placeholder.info(
+                "[1/4] Preparando cohorte balanceada para IBM Quantum..."
+            )
+            dataset_bundle = prepare_quantum_dataset(
+                dataset_path=LIVE_TRAINING_DATASET_PATH,
+                benign_samples=min(100, live_dataset_summary["benign_count"]),
+                attack_samples=min(100, live_dataset_summary["attack_count"]),
+                qubits=selected_quantum_qubits,
+                test_size=selected_quantum_test_size,
+                dataset_source="live",
+            )
+            X_train, y_train = select_balanced_quantum_subset(
+                dataset_bundle.X_train,
+                dataset_bundle.y_train,
+                samples_per_class=2,
+            )
+            X_test, y_test = select_balanced_quantum_subset(
+                dataset_bundle.X_test,
+                dataset_bundle.y_test,
+                samples_per_class=2,
+            )
+
+            def ibm_logger(message: str) -> None:
+                ibm_status_placeholder.info(message)
+
+            ibm_status_placeholder.info(
+                "[2/4] Conectando con IBM Quantum Runtime..."
+            )
+            quantum_results = run_ibm_qsvm_hardware_evaluation(
+                X_train=X_train,
+                y_train=y_train,
+                X_test=X_test,
+                y_test=y_test,
+                num_qubits=selected_quantum_qubits,
+                dataset_source="live",
+                dataset_path=LIVE_TRAINING_DATASET_PATH,
+                backend_name=None,
+                shots=int(ibm_shots),
+                logger=ibm_logger,
+            )
+            st.session_state["quantum_lab_results"] = quantum_results
+            st.session_state["quantum_lab_results_qubits"] = selected_quantum_qubits
+            st.session_state["quantum_lab_results_source"] = "live"
+            ibm_status_placeholder.info(
+                "[3/4] Guardando resultados auditables de IBM..."
+            )
+            try:
+                latest_path, specific_path = persist_ibm_qsvm_results(
+                    quantum_results
+                )
+                quantum_results["results_path"] = str(specific_path)
+                ibm_status_placeholder.success(
+                    "[4/4] QSVM ejecutado en "
+                    f"{quantum_results['ibm_backend_name']} y guardado en {latest_path}."
+                )
+            except OSError as persistence_error:
+                ibm_status_placeholder.warning(
+                    "El QSVM terminó correctamente en IBM, pero no pude guardar "
+                    f"el JSON local: {persistence_error}"
+                )
+        except Exception as error:
+            ibm_status_placeholder.error(
+                f"No pude ejecutar el QSVM en IBM Quantum: {error}"
+            )
 
     # ==========================================
     # Validación Física en SpinQ desde Live
@@ -735,6 +862,10 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
                     },
                     "rows": len(y_pred),
                     "sample_size": len(y_pred),
+                    "train_sample_size": train_size,
+                    "train_circuit_count": train_size * (train_size + 1) // 2,
+                    "test_circuit_count": test_size * train_size,
+                    "circuit_count": circuit_total,
                     "execution_target": "spinq",
                     "pipeline_version": "qsvm_fidelity_v2",
                     "num_qubits": 3,
@@ -816,8 +947,8 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
         st.markdown("<div style='margin-top: 2rem;'></div>", unsafe_allow_html=True)
         st.markdown("---")
         runtime_label = (
-            "Prevalidación para IBM Quantum"
-            if live_execution_target == "ibm_validate"
+            "IBM Quantum Cloud"
+            if live_execution_target == "ibm_quantum"
             else "Simulador Local"
         )
         st.subheader(
@@ -829,6 +960,16 @@ def render_live_tab(model_data: ModelData, selected_quantum_qubits: int) -> None
         metric_cols[1].metric("Precision", f"{metrics_payload['precision'] * 100:.2f}%")
         metric_cols[2].metric("Recall", f"{metrics_payload['recall'] * 100:.2f}%")
         metric_cols[3].metric("F1-Score", f"{metrics_payload['f1_score'] * 100:.2f}%")
+        if live_execution_target == "ibm_quantum":
+            render_quantum_noise_card(display_results.get("quantum_noise"))
+            ibm_usage = display_results.get("ibm_total_usage_seconds")
+            usage_label = f"{float(ibm_usage):.2f} s" if ibm_usage is not None else "n/d"
+            st.caption(
+                f"Backend: {display_results.get('ibm_backend_name', 'n/d')} · "
+                f"Shots: {display_results.get('ibm_shots', 'n/d')} · "
+                f"Uso QPU: {usage_label} · "
+                f"Jobs: {', '.join(display_results.get('ibm_job_ids', [])) or 'n/d'}"
+            )
         st.markdown("#### Matriz de Confusión")
         st.plotly_chart(
             make_confusion_chart(np.array(confusion_payload), height=280),

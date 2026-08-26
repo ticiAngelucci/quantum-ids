@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import streamlit as st
-import cv2
 from dashboard.constants import (
     ACCENT_YELLOW,
     BACKGROUND,

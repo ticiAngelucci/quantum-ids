@@ -12,6 +12,7 @@ from dashboard.constants import (
     DATASET_PATH,
     PCA_PATH,
     QUANTUM_HARDWARE_RESULTS_PATH,
+    QUANTUM_IBM_HARDWARE_RESULTS_PATH,
     SCALER_PATH,
 )
 from dashboard.types import ModelData, QuantumDatasetSource
@@ -19,13 +20,13 @@ from dashboard.ui import render_quantum_noise_card
 from src.utils.save_results import save_results
 
 
-def _load_saved_spinq_result(path) -> dict | None:
+def _load_saved_hardware_result(path, execution_target: str) -> dict | None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
     if (
-        payload.get("execution_target") != "spinq"
+        payload.get("execution_target") != execution_target
         or payload.get("pipeline_version") != "qsvm_fidelity_v2"
         or not isinstance(payload.get("metrics"), dict)
         or payload.get("confusion_matrix") is None
@@ -34,21 +35,28 @@ def _load_saved_spinq_result(path) -> dict | None:
     return payload
 
 
-def _sync_spinq_qubits() -> None:
-    if st.session_state.get("quantum_execution_target_radio") == "spinq":
+def _sync_quantum_target() -> None:
+    if st.session_state.get("quantum_execution_target_radio") in {
+        "spinq",
+        "ibm_quantum",
+    }:
         st.session_state["selected_quantum_qubits"] = 3
         st.session_state["quantum_results_selectbox"] = 3
-        st.session_state.pop("quantum_lab_results", None)
-        st.session_state.pop("quantum_lab_results_qubits", None)
-        st.session_state.pop("quantum_lab_results_source", None)
+    st.session_state.pop("quantum_lab_results", None)
+    st.session_state.pop("quantum_lab_results_qubits", None)
+    st.session_state.pop("quantum_lab_results_source", None)
 
 def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, selected_quantum_dataset_source: QuantumDatasetSource) -> None:
-    if st.session_state.get("quantum_execution_target_radio") == "spinq":
+    if st.session_state.get("quantum_execution_target_radio") in {
+        "spinq",
+        "ibm_quantum",
+    }:
         selected_quantum_qubits = 3
 
     selected_quantum_test_size = float(st.session_state.get("selected_quantum_test_size", 0.2))
     selected_quantum_feature_map_reps = int(st.session_state.get("selected_quantum_feature_map_reps", 2))
     spinq_connectivity_only = True
+    ibm_shots = 1024
     
     left, right = st.columns([1.2, 1], gap="large")
     
@@ -71,24 +79,25 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
         st.markdown('<p style="color: #FFFFFF; font-weight: 600; font-size: 0.95rem; margin-bottom: 0.4rem;">Entorno de ejecución cuántica</p>', unsafe_allow_html=True)
         selected_quantum_execution_target = st.radio(
             "Entorno de ejecución cuántica",
-            options=["simulator", "ibm_validate", "spinq"],
+            options=["simulator", "ibm_quantum", "spinq"],
             format_func=lambda value: {
                 "simulator": "Simulador Local Qiskit",
-                "ibm_validate": "IBM Quantum Cloud (Hardware Real)",
+                "ibm_quantum": "IBM Quantum Cloud (Hardware Real)",
                 "spinq": "Validación Acotada Hardware Real (SpinQ)"
             }.get(value, value),
             horizontal=True,
             key="quantum_execution_target_radio",
             label_visibility="collapsed",
-            on_change=_sync_spinq_qubits,
+            on_change=_sync_quantum_target,
         )
 
         if (
             selected_quantum_execution_target == "spinq"
             and "quantum_lab_results" not in st.session_state
         ):
-            saved_spinq_result = _load_saved_spinq_result(
-                QUANTUM_HARDWARE_RESULTS_PATH
+            saved_spinq_result = _load_saved_hardware_result(
+                QUANTUM_HARDWARE_RESULTS_PATH,
+                "spinq",
             )
             if (
                 saved_spinq_result
@@ -101,6 +110,23 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
                     "quantum_lab_results_source"
                 ] = selected_quantum_dataset_source
 
+        if (
+            selected_quantum_execution_target == "ibm_quantum"
+            and "quantum_lab_results" not in st.session_state
+        ):
+            saved_ibm_result = _load_saved_hardware_result(
+                QUANTUM_IBM_HARDWARE_RESULTS_PATH,
+                "ibm_quantum",
+            )
+            if (
+                saved_ibm_result
+                and saved_ibm_result.get("dataset_source") == selected_quantum_dataset_source
+                and saved_ibm_result.get("num_qubits") == selected_quantum_qubits
+            ):
+                st.session_state["quantum_lab_results"] = saved_ibm_result
+                st.session_state["quantum_lab_results_qubits"] = selected_quantum_qubits
+                st.session_state["quantum_lab_results_source"] = selected_quantum_dataset_source
+
         if selected_quantum_execution_target == "spinq":
             spinq_connectivity_only = st.checkbox(
                 "Prueba rápida de conexión (1 circuito)",
@@ -112,6 +138,19 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
                 ),
                 key="spinq_connectivity_only",
             )
+        elif selected_quantum_execution_target == "ibm_quantum":
+            with st.expander("Conexión IBM Quantum", expanded=True):
+                ibm_shots = st.selectbox(
+                    "Shots por circuito",
+                    options=[1024, 2048, 4096],
+                    index=0,
+                    key="ibm_qsvm_shots",
+                )
+                st.caption(
+                    "Selecciona automáticamente un backend compatible según tu acceso "
+                    "y disponibilidad. El límite de seguridad es 60 s de QPU por job "
+                    "(2 jobs por corrida)."
+                )
         
         st.markdown("<div style='margin-top: 1rem;'></div>", unsafe_allow_html=True)
         
@@ -144,7 +183,11 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
                 "Probar conexión SpinQ (1 circuito)"
                 if selected_quantum_execution_target == "spinq"
                 and spinq_connectivity_only
-                else f"Ejecutar Quantum Kernel ({selected_quantum_qubits}q)"
+                else (
+                    f"Ejecutar QSVM en IBM ({selected_quantum_qubits}q · 26 circuitos)"
+                    if selected_quantum_execution_target == "ibm_quantum"
+                    else f"Ejecutar Quantum Kernel ({selected_quantum_qubits}q)"
+                )
             ),
             width="stretch",
             type="primary",
@@ -734,6 +777,10 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
                         ).tolist(),
                         "sample_size": len(X_test),
                         "rows": len(X_test),
+                        "train_sample_size": len(X_train),
+                        "train_circuit_count": train_total,
+                        "test_circuit_count": test_total,
+                        "circuit_count": circuit_total,
                         "execution_target": "spinq",
                         "pipeline_version": "qsvm_fidelity_v2",
                         "num_qubits": 3,
@@ -767,7 +814,74 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
                 st.rerun()
 
             # ========================================================
-            # SIMULADOR / IBM
+            # IBM QUANTUM - HARDWARE REAL
+            # ========================================================
+            elif selected_quantum_execution_target == "ibm_quantum":
+                from src.preprocessing.quantum_preprocessing import (
+                    prepare_quantum_dataset,
+                    select_balanced_quantum_subset,
+                )
+                from src.quantum.ibm_qsvm import (
+                    persist_ibm_qsvm_results,
+                    run_ibm_qsvm_hardware_evaluation,
+                )
+
+                status_box.info("[1/4] Preparando cohorte balanceada para IBM Quantum...")
+                dataset_bundle = prepare_quantum_dataset(
+                    dataset_path=DATASET_PATH,
+                    benign_samples=10,
+                    attack_samples=10,
+                    qubits=selected_quantum_qubits,
+                    test_size=selected_quantum_test_size,
+                )
+                X_train, y_train = select_balanced_quantum_subset(
+                    dataset_bundle.X_train,
+                    dataset_bundle.y_train,
+                    samples_per_class=2,
+                )
+                X_test, y_test = select_balanced_quantum_subset(
+                    dataset_bundle.X_test,
+                    dataset_bundle.y_test,
+                    samples_per_class=2,
+                )
+
+                def ibm_logger(message: str) -> None:
+                    status_box.info(message)
+
+                status_box.info("[2/4] Conectando con IBM Quantum Runtime...")
+                quantum_results = run_ibm_qsvm_hardware_evaluation(
+                    X_train=X_train,
+                    y_train=y_train,
+                    X_test=X_test,
+                    y_test=y_test,
+                    num_qubits=selected_quantum_qubits,
+                    dataset_source=selected_quantum_dataset_source,
+                    dataset_path=DATASET_PATH,
+                    backend_name=None,
+                    shots=int(ibm_shots),
+                    logger=ibm_logger,
+                )
+                st.session_state["quantum_lab_results"] = quantum_results
+                st.session_state["quantum_lab_results_qubits"] = selected_quantum_qubits
+                st.session_state["quantum_lab_results_source"] = selected_quantum_dataset_source
+                status_box.info("[3/4] Guardando resultados auditables de IBM...")
+                try:
+                    latest_path, specific_path = persist_ibm_qsvm_results(
+                        quantum_results
+                    )
+                    quantum_results["results_path"] = str(specific_path)
+                    status_box.success(
+                        "[4/4] QSVM ejecutado en "
+                        f"{quantum_results['ibm_backend_name']} y guardado en {latest_path}."
+                    )
+                except OSError as persistence_error:
+                    status_box.warning(
+                        "El QSVM terminó correctamente en IBM, pero no pude guardar "
+                        f"el JSON local: {persistence_error}"
+                    )
+
+            # ========================================================
+            # SIMULADOR LOCAL
             # ========================================================
             else:
 
@@ -827,11 +941,6 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
                 quantum_kernel = FidelityQuantumKernel(
                     feature_map=feature_map
                 )
-
-                if selected_quantum_execution_target == "ibm_validate":
-
-                    X_test = X_test[:16]
-                    y_test = y_test[:16]
 
                 status_box.info(
                     "[3/5] Calculando Kernel de entrenamiento..."
@@ -897,6 +1006,13 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
                     ).tolist(),
                     "sample_size": len(X_test),
                     "rows": len(X_test),
+                    "train_sample_size": len(X_train),
+                    "train_circuit_count": len(X_train) * (len(X_train) - 1) // 2,
+                    "test_circuit_count": len(X_test) * len(X_train),
+                    "circuit_count": (
+                        len(X_train) * (len(X_train) - 1) // 2
+                        + len(X_test) * len(X_train)
+                    ),
                     "execution_target": selected_quantum_execution_target,
                 }
 
@@ -914,12 +1030,7 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
                     "quantum_lab_results_source"
                 ] = selected_quantum_dataset_source
 
-                target_label = (
-                    "IBM Quantum Cloud"
-                    if selected_quantum_execution_target
-                    == "ibm_validate"
-                    else "Simulador Local"
-                )
+                target_label = "Simulador Local"
 
                 st.success(
                     f"¡Prueba de Quantum Kernel finalizada "
@@ -957,7 +1068,7 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
         )
         target_label = {
             "spinq": "SpinQ Triangulum",
-            "ibm_validate": "IBM Quantum Cloud",
+            "ibm_quantum": "IBM Quantum Cloud",
             "simulator": "Simulador Local",
         }.get(result_target, str(result_target))
         evaluated_rows = int(
@@ -981,9 +1092,18 @@ def _render_quantum_lab(model_data: ModelData, selected_quantum_qubits: int, sel
         metric_cols[2].metric("Recall", f"{metrics['recall'] * 100:.2f}%")
         metric_cols[3].metric("F1-Score", f"{metrics['f1_score'] * 100:.2f}%")
 
-        if result_target == "spinq":
+        if result_target in {"spinq", "ibm_quantum"}:
             render_quantum_noise_card(
                 quantum_lab_results.get("quantum_noise")
+            )
+        if result_target == "ibm_quantum":
+            ibm_usage = quantum_lab_results.get("ibm_total_usage_seconds")
+            usage_label = f"{float(ibm_usage):.2f} s" if ibm_usage is not None else "n/d"
+            st.caption(
+                f"Backend: {quantum_lab_results.get('ibm_backend_name', 'n/d')} · "
+                f"Shots: {quantum_lab_results.get('ibm_shots', 'n/d')} · "
+                f"Uso QPU: {usage_label} · "
+                f"Jobs: {', '.join(quantum_lab_results.get('ibm_job_ids', [])) or 'n/d'}"
             )
 
         st.markdown("#### Matriz de Confusión")

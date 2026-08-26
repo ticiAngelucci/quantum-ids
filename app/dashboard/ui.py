@@ -63,7 +63,7 @@ def render_quantum_noise_card(noise_data: dict | None) -> None:
             <div style="color: #D9E4F2; font-size: 0.88rem;">{detail_html}</div>
             <div style="color: #A0B3C6; font-size: 0.76rem; line-height: 1.45; margin-top: 0.65rem;">
                 El ruido cuántico son pequeñas alteraciones no deseadas que modifican el resultado ideal de un circuito.
-                Esta estimación compara el kernel ideal con el medido por SpinQ e incluye efectos del hardware,
+                Esta estimación compara el kernel ideal con el medido por el backend físico e incluye efectos del hardware,
                 variación estadística de los shots y diferencias de ejecución; no representa una tasa física pura del dispositivo.
             </div>
         </div>
@@ -76,12 +76,9 @@ def render_header(model_data: ModelData) -> None:
     selected_model = st.session_state.get("selected_model", "Modelo clasico")
     selected_qubits = st.session_state.get("selected_quantum_qubits", 4)
     selected_dataset_source = st.session_state.get("selected_quantum_dataset_source", "cicids")
-    selected_platform = st.session_state.get("selected_quantum_execution_target", "simulator")
     model = model_data[selected_model]
     
     dataset_label = "Tráfico en vivo (Simulador)" if selected_dataset_source == "live" else "Base histórica (CICIDS)"
-    platform_label = "Hardware Real (SpinQ / IBM)" if selected_platform == "ibm_validate" else "Simulador Local"
-
     st.markdown(
         f"""
         <div style="padding: 1rem 0; border-bottom: 2px solid #FDB913; margin-bottom: 1.5rem;">
@@ -155,14 +152,16 @@ def render_sidebar_controls(
                 )
                 st.session_state["selected_quantum_dataset_source"] = selected_quantum_dataset_source
 
-            spinq_selected = (
+            fixed_three_qubit_hardware_selected = (
                 current_step == "2. Experimentar"
-                and st.session_state.get("quantum_execution_target_radio") == "spinq"
+                and st.session_state.get("quantum_execution_target_radio")
+                in {"spinq", "ibm_quantum"}
             ) or (
                 current_step == "3. Live"
-                and st.session_state.get("live_quantum_execution_target") == "spinq"
+                and st.session_state.get("live_quantum_execution_target")
+                in {"spinq", "ibm_quantum"}
             )
-            if spinq_selected:
+            if fixed_three_qubit_hardware_selected:
                 selected_quantum_qubits = 3
                 st.session_state["selected_quantum_qubits"] = 3
                 st.session_state["quantum_results_selectbox"] = 3
@@ -180,10 +179,11 @@ def render_sidebar_controls(
                 "Número de Qubits",
                 options=qubit_options,
                 key="quantum_results_selectbox",
-                disabled=spinq_selected,
+                disabled=fixed_three_qubit_hardware_selected,
                 help=(
-                    "SpinQ Triangulum utiliza exactamente 3 qubits."
-                    if spinq_selected
+                    "Las evaluaciones físicas acotadas de SpinQ e IBM Quantum "
+                    "utilizan exactamente 3 qubits."
+                    if fixed_three_qubit_hardware_selected
                     else None
                 ),
             )
@@ -225,6 +225,7 @@ def render_sidebar_controls(
         model = model_data[selected_model]
         st.markdown("### Estado del Modelo")
         if selected_model == "Modelo cuantico":
+            workload_explanation_label = "¿Por qué esta cantidad de circuitos?"
             active_target = (
                 st.session_state.get("live_quantum_execution_target", "simulator")
                 if current_step == "3. Live"
@@ -232,21 +233,92 @@ def render_sidebar_controls(
             )
             target_label = {
                 "simulator": "Simulador Local Qiskit",
-                "ibm_validate": "Prevalidación para IBM Quantum",
+                "ibm_quantum": "IBM Quantum Cloud",
                 "spinq": "SpinQ Triangulum",
             }.get(active_target, str(active_target))
+
+            if active_target == "simulator":
+                if current_step == "3. Live":
+                    circuit_summary = (
+                        "79.800 entrenamiento + 40.000 prueba = 119.800 "
+                        "(máximo default)"
+                    )
+                    circuit_explanation = """
+**Simulación local Live — configuración predeterminada máxima**
+
+El flujo toma como máximo 500 muestras balanceadas: 250 benignas y 250 ataques. Con el split predeterminado 80/20 quedan 400 muestras de entrenamiento y 100 de prueba.
+
+- Entrenamiento: `400·399/2 = 79.800` circuitos.
+- Prueba: `100·400 = 40.000` circuitos.
+- Total: `119.800` circuitos lógicos de fidelidad.
+
+Si el dataset Live tiene menos de 250 muestras por clase, la cantidad real será menor. Los *shots* no son circuitos adicionales: son repeticiones de medición.
+                    """
+                else:
+                    circuit_summary = (
+                        "114.960 entrenamiento + 57.600 prueba = 172.560 "
+                        "(default)"
+                    )
+                    circuit_explanation = """
+**Simulación local CICIDS2017 — configuración predeterminada**
+
+El flujo toma 600 muestras balanceadas: 300 benignas y 300 ataques. Con el split predeterminado 80/20 quedan 480 muestras de entrenamiento y 120 de prueba.
+
+- Entrenamiento: `480·479/2 = 114.960` circuitos.
+- Prueba: `120·480 = 57.600` circuitos.
+- Total: `172.560` circuitos lógicos de fidelidad.
+
+La diagonal se fija analíticamente en 1 y no se ejecuta. Si la limpieza descarta filas inválidas, la cantidad real puede ser ligeramente menor. Los *shots* no son circuitos adicionales: son repeticiones de medición.
+                    """
+            elif active_target == "spinq":
+                circuit_summary = "10 entrenamiento + 16 prueba = 26"
+                circuit_explanation = """
+**SpinQ Triangulum**
+
+Se usan 4 muestras de entrenamiento y 4 de prueba. En hardware se mide el triángulo superior incluyendo la diagonal: `4·5/2 = 10` circuitos de entrenamiento. Luego se calculan `4·4 = 16` circuitos de prueba. La reducción a 26 circuitos permite controlar el tiempo de uso del equipo físico. La prueba rápida de conexión ejecuta solamente 1 circuito.
+
+Los *shots* no son circuitos adicionales: son repeticiones de medición de cada circuito.
+                """
+            else:
+                circuit_summary = "10 entrenamiento + 16 prueba = 26"
+                circuit_explanation = """
+**IBM Quantum**
+
+Se usan 4 muestras de entrenamiento y 4 de prueba. El kernel de entrenamiento mide el triángulo superior incluyendo la diagonal: `4·5/2 = 10` circuitos. El kernel de prueba compara las 4 muestras de prueba contra las 4 de entrenamiento: `4·4 = 16` circuitos. Los 26 circuitos se agrupan en 2 jobs —uno de entrenamiento y otro de prueba— para controlar el uso QPU.
+
+Los *shots* no son circuitos adicionales: son repeticiones de medición de cada circuito.
+                """
+
             st.write(
                 f"• Modelo: **QSVM (Quantum Kernel)**\n\n"
                 f"• Entorno: **{target_label}**\n\n"
                 f"• Qubits: **{selected_quantum_qubits}**\n\n"
+                f"• Circuitos: **{circuit_summary}**\n\n"
                 f"• Accuracy de referencia: **{model['accuracy']:.1%}**"
             )
         else:
+            workload_explanation_label = "¿Por qué esta carga predeterminada?"
+            circuit_explanation = """
+**Enfoque tradicional — Random Forest**
+
+La configuración predeterminada parte de 190.911 registros válidos de CICIDS2017 y utiliza un split 80/20.
+
+- Entrenamiento: `152.728` muestras.
+- Prueba: `38.183` muestras.
+- Total procesado: `190.911` muestras.
+
+Todo se ejecuta en CPU mediante Random Forest; los circuitos cuánticos no aplican en este caso.
+            """
             st.write(
                 "• Modelo: **Random Forest**\n\n"
                 "• Enfoque: **Baseline clásico supervisado**\n\n"
+                "• Carga default: **152.728 muestras entrenamiento + "
+                "38.183 prueba = 190.911**\n\n"
                 f"• Accuracy de referencia: **{model['accuracy']:.1%}**"
             )
+
+        with st.expander(workload_explanation_label, expanded=False):
+            st.markdown(circuit_explanation)
 
     return SidebarSelection(
         selected_model=selected_model,
